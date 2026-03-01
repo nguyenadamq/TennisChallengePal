@@ -1,20 +1,16 @@
-import { useState } from 'react'
-import reactLogo from './assets/react.svg'
-import viteLogo from '/vite.svg'
-import { supabase } from './supabaseClient'
+import { Routes, Route } from 'react-router-dom'
+import Login from './pages/Login'
+import Signup from './pages/Signup'
+import Dashboard from './pages/Dashboard'
 import './App.css'
 
 function App() {
-  const [count, setCount] = useState(0)
-
   return (
-    <>
-      <form>
-          <input
-            src
-          />
-      </form>
-    </>
+    <Routes>
+        <Route path="/" element={ <Login />} />
+        <Route path="/signup" element={ <Signup />} />
+        <Route path="/dashboard" element={ <Dashboard />} />
+    </Routes>
   )
 }
 
