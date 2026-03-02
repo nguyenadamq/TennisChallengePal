@@ -4,7 +4,7 @@ export async function signUp(email, password, username) {
     const { data, error } = await supabase.auth.signUp({ email, password})
     if (error) throw error
 
-    const user = data.user
+    const user = data.session
     if(!user) return { needsEmailConfirmation: true}
 
     //Create profile with username
@@ -22,15 +22,6 @@ export async function signIn(email, password ) {
     })
     if(error) throw error
     return data.session
-}
-export async function loadMyNotes() {
-    const { data, error } = await supabase
-        .from('notes')
-        .select('id, body, created_at')
-        .order('created_at', {ascending: false})
-
-    if(error) throw error
-    return data
 }
 
 export async function signOut() {

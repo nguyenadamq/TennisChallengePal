@@ -9,13 +9,12 @@ export default function Login() {
 
     async function handleSubmit(e) {
         e.preventDefault()
-        const { error } = await signIn(email, password)
-
-        if(error) {
-            alert(error.message)
-        } else {
-            alert("You logged in!")
-            navigate('/dashboard')
+        try {
+            await signIn(email, password);
+            alert("You logged in!");
+            navigate('/dashboard');
+        } catch (error) {
+            alert(error.message);
         }
     }
 
