@@ -1,35 +1,105 @@
 import { supabase } from '../lib/supabaseClient'
 
-export async function signUp(email, password, username) {
-    const { data, error } = await supabase.auth.signUp({ email, password})
-    if (error) throw error
-
-    const user = data.session
-    if(!user) return { needsEmailConfirmation: true}
-
-    //Create profile with username
-    const { error: profileError } = await supabase
-        .from('profiles')
-        .insert({ id: user.id, username})
-    if(profileError) throw profileError
-    return { user }
+function delay(ms) {
+  return new Promise((resolve) => {
+    window.setTimeout(resolve, ms)
+  })
 }
 
-export async function signIn(email, password ) {
-    const { data, error } = await supabase.auth.signInWithPassword({
-        email,
-        password
-    })
-    if(error) throw error
-    return data.session
+async function fetchProfileOnce(userId) {
+  const { data, error } = await supabase
+    .from('profiles')
+    .select('id, email, display_name, username, gender, role, created_at')
+    .eq('id', userId)
+    .maybeSingle()
+
+  if (error) {
+    throw error
+  }
+
+  return data
+}
+
+export async function signUp({ email, password, displayName, username, gender }) {
+  const { data, error } = await supabase.auth.signUp({
+    email,
+    password,
+    options: {
+      data: {
+        display_name: displayName.trim(),
+        username: username.trim().toLowerCase(),
+        gender,
+      },
+    },
+  })
+
+  if (error) {
+    throw error
+  }
+
+  if (data.session?.user?.id) {
+    await waitForProfile(data.session.user.id)
+  }
+
+  return {
+    session: data.session,
+    needsEmailConfirmation: !data.session,
+  }
+}
+
+export async function signIn(email, password) {
+  const { data, error } = await supabase.auth.signInWithPassword({
+    email,
+    password,
+  })
+
+  if (error) {
+    throw error
+  }
+
+  return data.session
 }
 
 export async function signOut() {
-    const { error } = await supabase.auth.signOut()
-    if (error) throw error
+  const { error } = await supabase.auth.signOut()
+
+  if (error) {
+    throw error
+  }
 }
 
-export async function getSession() {
-    const { data } = await supabase.auth.getSession()
-    return data.session
+export async function getProfile(userId) {
+  const profile = await fetchProfileOnce(userId)
+
+  if (!profile) {
+    throw new Error('Profile not found for this account.')
+  }
+
+  return profile
+}
+
+export async function waitForProfile(userId, attempts = 8) {
+  for (let index = 0; index < attempts; index += 1) {
+    const profile = await fetchProfileOnce(userId)
+
+    if (profile) {
+      return profile
+    }
+
+    await delay(250)
+  }
+
+  throw new Error(
+    'Your account was created, but your profile is still syncing. Please wait a moment and log in again.',
+  )
+}
+
+export async function claimAdminRole(password) {
+  const { error } = await supabase.rpc('claim_admin_role', {
+    p_password: password,
+  })
+
+  if (error) {
+    throw error
+  }
 }
