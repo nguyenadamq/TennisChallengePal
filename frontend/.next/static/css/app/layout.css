@@ -258,7 +258,7 @@ button, input, select, textarea {
 .auth-hero, .auth-card, .panel {
   background: var(--color-surface);
   border: 1px solid var(--color-border);
-  border-radius: 28px;
+  border-radius: 18px;
   box-shadow: 0 24px 80px var(--color-shadow);
   backdrop-filter: blur(18px);
 }
@@ -298,7 +298,7 @@ button, input, select, textarea {
 .form-stack input, .form-stack select, .form-stack textarea, .compact-form input, .compact-form select, .compact-form textarea {
   width: 100%;
   border: 1px solid rgba(255, 255, 255, 0.1);
-  border-radius: 16px;
+  border-radius: 12px;
   background: rgba(255, 255, 255, 0.05);
   color: var(--color-text);
   padding: 0.85rem 1rem;
@@ -316,7 +316,7 @@ button, input, select, textarea {
 }
 .primary-button, .secondary-button, .tiny-button {
   border: 0;
-  border-radius: 999px;
+  border-radius: 12px;
   cursor: pointer;
   transition: transform 180ms ease, opacity 180ms ease, background 180ms ease;
 }
@@ -360,7 +360,7 @@ button, input, select, textarea {
 .hero-pills span, .count-pill, .status-pill, .profile-chip {
   border: 1px solid var(--color-border);
   background: rgba(255, 255, 255, 0.05);
-  border-radius: 999px;
+  border-radius: 12px;
 }
 .hero-pills span, .count-pill, .status-pill {
   padding: 0.45rem 0.85rem;
@@ -405,7 +405,7 @@ button, input, select, textarea {
   border: 1px solid var(--color-border);
   background: rgba(255, 255, 255, 0.05);
   color: var(--color-text);
-  border-radius: 999px;
+  border-radius: 12px;
   padding: 0.75rem 1rem;
   cursor: pointer;
 }
@@ -435,7 +435,7 @@ button, input, select, textarea {
 .flash {
   margin: 0 0 1rem;
   padding: 0.95rem 1.1rem;
-  border-radius: 16px;
+  border-radius: 12px;
   border: 1px solid var(--color-border);
 }
 .flash-error {
@@ -461,7 +461,7 @@ button, input, select, textarea {
 }
 .ladder-card {
   border: 1px solid var(--color-border);
-  border-radius: 24px;
+  border-radius: 16px;
   padding: 1.25rem;
   background: rgba(255, 255, 255, 0.03);
 }
@@ -470,7 +470,7 @@ button, input, select, textarea {
 }
 .ladder-table-card {
   border: 1px solid var(--color-border);
-  border-radius: 24px;
+  border-radius: 16px;
   padding: 1.2rem;
   background: rgba(255, 255, 255, 0.03);
 }
@@ -509,6 +509,12 @@ button, input, select, textarea {
 .team-cell span, .empty-cell {
   color: var(--color-muted);
 }
+.muted-inline {
+  color: var(--color-muted);
+}
+.ladder-row-active td {
+  background: rgba(245, 178, 73, 0.08);
+}
 .empty-cell {
   text-align: center;
 }
@@ -518,6 +524,12 @@ button, input, select, textarea {
 }
 .friends-grid {
   grid-template-columns: repeat(2, minmax(0, 1fr));
+  align-items: stretch;
+}
+.friends-grid > .panel {
+  width: 100%;
+  min-width: 0;
+  box-sizing: border-box;
 }
 .panel-subtle {
   padding: 1rem;
@@ -575,6 +587,40 @@ button, input, select, textarea {
   background: rgba(255, 255, 255, 0.05);
   color: var(--color-text);
   padding: 0.7rem 0.85rem;
+}
+.mini-item > div {
+  display: grid;
+  gap: 0.25rem;
+}
+.modal-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(7, 16, 12, 0.72);
+  display: grid;
+  place-items: center;
+  padding: 1rem;
+  z-index: 40;
+}
+.modal-card {
+  width: min(560px, 100%);
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: 18px;
+  box-shadow: 0 24px 80px var(--color-shadow);
+  padding: 1.5rem;
+}
+.modal-card h2, .modal-card p {
+  margin-top: 0;
+}
+.modal-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 0.75rem;
+  flex-wrap: wrap;
+  margin-top: 1.25rem;
+}
+.danger-button {
+  background: linear-gradient(135deg, #ef9074, #f5b249);
 }
 .status-pill {
   text-transform: capitalize;

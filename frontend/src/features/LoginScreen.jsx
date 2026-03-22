@@ -67,8 +67,8 @@ export default function Login() {
         <p className="eyebrow">Live Club Rankings</p>
         <h1>Tennis Challenge Pal</h1>
         <p className="auth-copy">
-          Run every ladder from one place. Admins manage rankings and requests,
-          and players track live standings across singles, doubles, and mixed.
+          Run every ladder from one place. Officers manage rankings and requests,
+          and members track live standings across singles, doubles, and mixed.
         </p>
         <div className="hero-pills">
           <span>Mens Singles</span>

@@ -16,6 +16,7 @@ const initialForm = {
 
 const BLOCKED_USERNAME_PARTS = [
   'admin',
+  'officer',
   'moderator',
   'support',
   'staff',

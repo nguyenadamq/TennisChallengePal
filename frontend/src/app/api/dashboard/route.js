@@ -10,7 +10,7 @@ export async function GET(request) {
       .select('*')
       .order('created_at', { ascending: false })
 
-    if (profile.role !== 'admin') {
+    if (profile.role !== 'officer') {
       requestsQuery.or(`requester_id.eq.${user.id},partner_user_id.eq.${user.id}`)
     }
 
@@ -36,7 +36,7 @@ export async function GET(request) {
         .order('ladder_sort_order', { ascending: true })
         .order('rank_position', { ascending: true }),
       requestsQuery,
-      profile.role === 'admin'
+      profile.role === 'officer'
         ? supabaseUser
             .from('profiles')
             .select('id, display_name, username, gender, role')

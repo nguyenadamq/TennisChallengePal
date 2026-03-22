@@ -10,22 +10,23 @@ Tennis Challenge Pal is now structured as a Supabase-backed fullstack ladder app
 - `supabase/migrations/0005_fix_notification_signature.sql`: fixes notification creation when admin approvals or rejections send updates
 - `supabase/migrations/0006_fix_friend_request_status_cast.sql`: fixes accepting or declining friend requests when enum status writes were treated as text
 - `supabase/migrations/0007_allow_partner_to_read_ladder_requests.sql`: lets invited doubles partners actually see pending partner invites in the app
+- `supabase/migrations/0008_roles_and_member_self_drop.sql`: renames roles to `member` and `officer`, adds reserved username updates, and allows members to drop only their own ladder spot
 
 Use the setup instructions in this file and `frontend/README.md` to connect the app to your Supabase project.
 
 ## What It Supports
 
 - Email/password signup and login
-- `admin` and `user` roles
+- `officer` and `member` roles
 - Five live leaderboards:
   - Mens Singles
   - Mens Doubles
   - Mixed Doubles
   - Womens Singles
   - Womens Doubles
-- Admin actions to add, remove, and move players on each ladder
-- User requests to join a ladder or challenge for a higher spot
-- Admin review queue for pending requests
+- Officer actions to add, remove, and move players on each ladder
+- Member requests to join a ladder or challenge for a higher spot
+- Officer review queue for pending requests
 - Supabase realtime updates so the boards refresh live
 - Unique usernames for user search
 - Friend requests and friend lists
@@ -42,12 +43,13 @@ Use the setup instructions in this file and `frontend/README.md` to connect the 
 7. Then run the SQL from `supabase/migrations/0005_fix_notification_signature.sql`.
 8. Then run the SQL from `supabase/migrations/0006_fix_friend_request_status_cast.sql`.
 9. Then run the SQL from `supabase/migrations/0007_allow_partner_to_read_ladder_requests.sql`.
-10. In `Authentication > Providers`, keep `Email` enabled.
-11. In `Authentication > URL Configuration`, add:
+10. Then run the SQL from `supabase/migrations/0008_roles_and_member_self_drop.sql`.
+11. In `Authentication > Providers`, keep `Email` enabled.
+12. In `Authentication > URL Configuration`, add:
    - `http://localhost:5173` as a site URL for local development
    - `http://localhost:5173/**` as an additional redirect URL if you want email confirmation links to return to the app
-12. Copy your project URL and anon key from `Project Settings > API`.
-13. Create `frontend/.env` using `frontend/.env.example`.
+13. Copy your project URL and anon key from `Project Settings > API`.
+14. Create `frontend/.env` using `frontend/.env.example`.
 
 Example:
 
@@ -56,27 +58,27 @@ NEXT_PUBLIC_SUPABASE_URL=https://your-project.supabase.co
 NEXT_PUBLIC_SUPABASE_ANON_KEY=your-anon-key
 ```
 
-## Create The First Admin
+## Create The First Officer
 
 Signup in the app normally first. Then, in the Supabase SQL editor, run:
 
 ```sql
 update public.profiles
-set role = 'admin'
-where email = 'your-admin-email@example.com';
+set role = 'officer'
+where email = 'your-officer-email@example.com';
 ```
 
-After logging out and back in, that account will see the admin console.
+After logging out and back in, that account will see the officer console.
 
-## Optional Self-Promotion To Admin
+## Optional Self-Promotion To Officer
 
-Users can now promote themselves from the profile settings area if they know a shared admin promotion password.
+Users can now promote themselves from the profile settings area if they know a shared officer promotion password.
 
 Set that password once in the Supabase SQL editor:
 
 ```sql
 insert into public.admin_promotion_secrets (id, password_hash)
-values (true, extensions.crypt('your-shared-admin-password', extensions.gen_salt('bf')))
+values (true, extensions.crypt('your-shared-officer-password', extensions.gen_salt('bf')))
 on conflict (id) do update
 set password_hash = excluded.password_hash;
 ```
@@ -86,7 +88,7 @@ Important notes:
 - The plaintext password is never stored in the database.
 - The frontend sends the entered password to a protected Supabase RPC.
 - The RPC compares it against the stored bcrypt hash using `extensions.crypt(...)`.
-- If it matches, only the currently logged-in user is promoted to `admin`.
+- If it matches, only the currently logged-in user is promoted to `officer`.
 
 If you do not want this feature, simply do not insert a row into `public.admin_promotion_secrets`.
 
@@ -127,7 +129,7 @@ This app is built to avoid SQL injection:
 - The Next.js app uses typed API requests and Supabase RPC calls, not raw string-concatenated SQL.
 - The database functions in [0001_tennis_challenge_pal.sql](C:\Users\User\Documents\GitHub\TennisChallengePal\supabase\migrations\0001_tennis_challenge_pal.sql) do not use dynamic SQL like `execute`.
 - User input is passed as typed function parameters into Postgres.
-- Role-sensitive operations such as admin promotion, entry moves, request approval, and manual ladder changes are done through protected `security definer` functions with explicit checks.
+- Role-sensitive operations such as officer promotion, entry moves, request approval, and manual ladder changes are done through protected `security definer` functions with explicit checks.
 ## Username Rules
 
 Usernames are now created during signup and are enforced in both the app and the database:
@@ -137,7 +139,7 @@ Usernames are now created during signup and are enforced in both the app and the
 - Must use 3-24 lowercase letters, numbers, or underscores
 - Cannot be only numbers
 - Cannot start with `player_`
-- Cannot contain blocked admin/reserved/inappropriate terms
+- Cannot contain blocked officer/member/reserved/inappropriate terms
 
 ## Destructive Reset
 

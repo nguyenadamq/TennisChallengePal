@@ -8,6 +8,7 @@ import { supabase } from '../lib/supabaseClient'
 import { claimAdminRole, signOut, waitForProfile } from '../services/auth'
 import {
   createManualEntry,
+  dropOwnEntry,
   fetchDashboardData,
   moveEntry,
   removeEntry,
@@ -42,6 +43,10 @@ function formatStatus(value) {
   return value.replaceAll('_', ' ')
 }
 
+function formatRoleLabel(value) {
+  return value === 'officer' ? 'Officer' : 'Member'
+}
+
 function HomeTab({
   profile,
   myEntries,
@@ -62,9 +67,9 @@ function HomeTab({
         <article className="panel">
           <p className="eyebrow">Doubles Requests</p>
           <h2>Partner flow</h2>
-          <p>Invite a confirmed friend for doubles. Your friend must accept before the request moves to admins.</p>
+          <p>Invite a confirmed friend for doubles. Your friend must accept before the request moves to officers.</p>
           <p className="muted-text">
-            If either player is already on two ladders, they choose which ladder will drop only if the admin later approves the request.
+            If either player is already on two ladders, they choose which ladder will drop only if the officer later approves the request.
           </p>
         </article>
         <article className="panel">
@@ -85,8 +90,8 @@ function HomeTab({
         </article>
       </section>
 
-      <section className="content-grid">
-        <div className="panel panel-wide">
+        <section className="content-grid">
+          <div className="panel panel-wide">
           <div className="section-heading">
             <div>
               <p className="eyebrow">Start Here</p>
@@ -112,18 +117,18 @@ function HomeTab({
         <aside className="sidebar-stack">
           <section className="panel">
             <p className="eyebrow">Profile Settings</p>
-            <h2>Admin access</h2>
-            {profile.role === 'admin' ? (
-              <p className="muted-text">This account already has admin access.</p>
+            <h2>Officer access</h2>
+            {profile.role === 'officer' ? (
+              <p className="muted-text">This account already has officer access.</p>
             ) : (
               <form className="form-stack compact-form" onSubmit={handleAdminPromotion}>
                 <label>
-                  <span>Shared admin password</span>
+                  <span>Shared officer password</span>
                   <input
                     type="password"
                     value={adminPromotionPassword}
                     onChange={(event) => setAdminPromotionPassword(event.target.value)}
-                    placeholder="Enter admin password"
+                    placeholder="Enter officer password"
                     required
                   />
                 </label>
@@ -132,7 +137,7 @@ function HomeTab({
                   type="submit"
                   disabled={busyAction === 'claim-admin' || !adminPromotionPassword.trim()}
                 >
-                  {busyAction === 'claim-admin' ? 'Verifying...' : 'Promote to admin'}
+                  {busyAction === 'claim-admin' ? 'Verifying...' : 'Promote to officer'}
                 </button>
               </form>
             )}
@@ -165,6 +170,7 @@ export default function Dashboard() {
   const [adminRankInputs, setAdminRankInputs] = useState({})
   const [activeTab, setActiveTab] = useState('home')
   const [archivedNotificationsOpen, setArchivedNotificationsOpen] = useState(false)
+  const [dropConfirmEntry, setDropConfirmEntry] = useState(null)
   const router = useRouter()
 
   const loadDashboard = useCallback(async () => {
@@ -178,7 +184,7 @@ export default function Dashboard() {
     }
 
     const nextProfile = await waitForProfile(session.user.id)
-    const snapshot = await fetchDashboardData(session.user.id, nextProfile.role === 'admin')
+    const snapshot = await fetchDashboardData(session.user.id, nextProfile.role === 'officer')
 
     startTransition(() => {
       setProfile(nextProfile)
@@ -337,8 +343,8 @@ export default function Dashboard() {
         }))
       },
       DOUBLES_LADDERS.includes(requestForm.ladderCode) && requestForm.requestType === 'join'
-        ? 'Invite sent to your friend. The admin sees it after your partner accepts.'
-        : 'Request submitted to the admin queue.',
+        ? 'Invite sent to your friend. The officer team sees it after your partner accepts.'
+        : 'Request submitted to the officer queue.',
     )
   }
 
@@ -390,7 +396,24 @@ export default function Dashboard() {
         await claimAdminRole(adminPromotionPassword)
         setAdminPromotionPassword('')
       },
-      'Admin access enabled for this account.',
+      'Officer access enabled for this account.',
+    )
+  }
+
+  async function confirmSelfDrop() {
+    if (!dropConfirmEntry) {
+      return
+    }
+
+    const currentEntry = dropConfirmEntry
+
+    await runAction(
+      `self-drop-${currentEntry.entry_id}`,
+      async () => {
+        await dropOwnEntry(currentEntry.entry_id)
+        setDropConfirmEntry(null)
+      },
+      'Your ladder spot was dropped.',
     )
   }
 
@@ -432,8 +455,8 @@ export default function Dashboard() {
     { id: 'friends', label: 'Friends', badge: unreadCount > 0 ? unreadCount : null },
   ]
 
-  if (profile.role === 'admin') {
-    navItems.push({ id: 'admin', label: 'Admin' })
+  if (profile.role === 'officer') {
+    navItems.push({ id: 'admin', label: 'Officer' })
   }
 
   return (
@@ -443,14 +466,14 @@ export default function Dashboard() {
           <p className="eyebrow">Tennis Challenge Pal</p>
           <h1>Live ladder center</h1>
           <p className="topbar-copy">
-            Username-based friends, doubles invites, admin review, and readable ladder boards in one place.
+            Username-based friends, doubles invites, officer review, and readable ladder boards in one place.
           </p>
         </div>
 
         <div className="topbar-actions">
           <div className="profile-chip">
             <strong>{profile.display_name}</strong>
-            <span>@{profile.username} | {profile.role} | {profile.gender}</span>
+            <span>@{profile.username} | {formatRoleLabel(profile.role)} | {profile.gender}</span>
           </div>
           <button className="secondary-button" onClick={handleSignOut} type="button">
             Sign out
@@ -496,8 +519,18 @@ export default function Dashboard() {
                 {myEntries.length ? (
                   myEntries.map((entry) => (
                     <div key={entry.entry_id} className="mini-item">
-                      <strong>{entry.ladder_name}</strong>
-                      <span>Rank #{entry.rank_position}</span>
+                      <div>
+                        <strong>{entry.ladder_name}</strong>
+                        <span>Rank #{entry.rank_position}</span>
+                      </div>
+                      <button
+                        className="tiny-button tiny-button-danger"
+                        type="button"
+                        disabled={busyAction === `self-drop-${entry.entry_id}`}
+                        onClick={() => setDropConfirmEntry(entry)}
+                      >
+                        Drop spot
+                      </button>
                     </div>
                   ))
                 ) : (
@@ -532,9 +565,11 @@ export default function Dashboard() {
                     ladder={ladder}
                     entries={getEntriesForLadder(ladder.id)}
                     isAdmin={false}
+                    currentUserId={profile.id}
                     busyAction={busyAction}
                     onMove={() => {}}
                     onRemove={() => {}}
+                    onSelfDrop={(entry) => setDropConfirmEntry(entry)}
                   />
                 ))}
               </div>
@@ -656,7 +691,7 @@ export default function Dashboard() {
                   ) : null}
 
                   <label>
-                    <span>Message for admins</span>
+                    <span>Message for officers</span>
                     <textarea
                       rows="4"
                       value={requestForm.message}
@@ -788,7 +823,7 @@ export default function Dashboard() {
                     </div>
                   ))
                 ) : (
-                  <p className="muted-text">Search a username to send a friend request.</p>
+                <p className="muted-text">Search a username to send a friend request.</p>
                 )}
               </div>
             </article>
@@ -880,7 +915,7 @@ export default function Dashboard() {
                             {request.ladder_name} | @{request.requester_username}
                           </p>
                           <p className="muted-text">
-                            Accepting sends the request to admins and notifies your partner.
+                            Accepting sends the request to officers and notifies your partner.
                           </p>
                           {needsInviteDropChoice ? (
                             <div className="inline-field">
@@ -920,7 +955,7 @@ export default function Dashboard() {
                                     true,
                                     inviteDropChoices[request.request_id] || null,
                                   ),
-                                'Invite accepted and sent to admins.',
+                                'Invite accepted and sent to officers.',
                               )
                             }
                           >
@@ -1019,7 +1054,7 @@ export default function Dashboard() {
         </>
       ) : null}
 
-      {activeTab === 'admin' && profile.role === 'admin' ? (
+      {activeTab === 'admin' && profile.role === 'officer' ? (
         <>
           <section className="info-grid">
             <article className="panel">
@@ -1030,7 +1065,7 @@ export default function Dashboard() {
             <article className="panel">
               <p className="eyebrow">Players</p>
               <h2>{profiles.length}</h2>
-              <p className="muted-text">Admins can place users manually and adjust rankings from here.</p>
+              <p className="muted-text">Officers can place members manually and adjust rankings from here.</p>
             </article>
             <article className="panel">
               <p className="eyebrow">Live Control</p>
@@ -1043,7 +1078,7 @@ export default function Dashboard() {
             <div className="panel panel-wide">
               <div className="section-heading">
                 <div>
-                  <p className="eyebrow">Admin Leaderboards</p>
+                  <p className="eyebrow">Officer Leaderboards</p>
                   <h2>Move and remove entries</h2>
                 </div>
               </div>
@@ -1054,6 +1089,7 @@ export default function Dashboard() {
                     ladder={ladder}
                     entries={getEntriesForLadder(ladder.id)}
                     isAdmin
+                    currentUserId={profile.id}
                     busyAction={busyAction}
                     onMove={(entryId, newRank) =>
                       runAction(
@@ -1076,7 +1112,7 @@ export default function Dashboard() {
 
             <aside className="sidebar-stack">
               <section className="panel">
-                <p className="eyebrow">Admin Add</p>
+                <p className="eyebrow">Officer Add</p>
                 <h2>Add a ladder entry</h2>
                 <form className="form-stack compact-form" onSubmit={handleAdminAdd}>
                   <label>
@@ -1214,7 +1250,7 @@ export default function Dashboard() {
                                       ? Number(adminRankInputs[request.request_id])
                                       : null,
                                   ),
-                                'Admin request approved.',
+                                'Officer request approved.',
                               )
                             }
                           >
@@ -1228,7 +1264,7 @@ export default function Dashboard() {
                               runAction(
                                 `reject-${request.request_id}`,
                                 () => resolveRequest(request.request_id, 'rejected', null),
-                                'Admin request rejected.',
+                                'Officer request rejected.',
                               )
                             }
                           >
@@ -1238,13 +1274,47 @@ export default function Dashboard() {
                       </div>
                     ))
                   ) : (
-                    <p className="muted-text">No admin-ready requests right now.</p>
+                    <p className="muted-text">No officer-ready requests right now.</p>
                   )}
                 </div>
               </section>
             </aside>
           </section>
         </>
+      ) : null}
+
+      {dropConfirmEntry ? (
+        <div className="modal-backdrop" role="presentation" onClick={() => setDropConfirmEntry(null)}>
+          <div
+            className="modal-card"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="drop-confirm-title"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <p className="eyebrow">Confirm Drop</p>
+            <h2 id="drop-confirm-title">Remove your spot from {dropConfirmEntry.ladder_name}?</h2>
+            <p>
+              This will remove your current ladder position and close the gap exactly the same way an officer removal does.
+            </p>
+            {dropConfirmEntry.partner_user_id ? (
+              <p className="muted-text">This is a doubles entry, so dropping it removes the full team from the ladder.</p>
+            ) : null}
+            <div className="modal-actions">
+              <button className="secondary-button" type="button" onClick={() => setDropConfirmEntry(null)}>
+                Cancel
+              </button>
+              <button
+                className="primary-button danger-button"
+                type="button"
+                disabled={busyAction === `self-drop-${dropConfirmEntry.entry_id}`}
+                onClick={confirmSelfDrop}
+              >
+                {busyAction === `self-drop-${dropConfirmEntry.entry_id}` ? 'Dropping...' : 'Yes, drop my spot'}
+              </button>
+            </div>
+          </div>
+        </div>
       ) : null}
     </main>
   )

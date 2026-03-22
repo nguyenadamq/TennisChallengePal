@@ -10,11 +10,5 @@
     "files": [
       "static/chunks/_app-pages-browser_src_features_DashboardScreen_jsx.js"
     ]
-  },
-  "app\\login\\page.jsx -> ../../features/LoginScreen": {
-    "id": "app\\login\\page.jsx -> ../../features/LoginScreen",
-    "files": [
-      "static/chunks/_app-pages-browser_src_features_LoginScreen_jsx.js"
-    ]
   }
 }

@@ -4,9 +4,11 @@ export default function LadderTable({
   ladder,
   entries,
   isAdmin,
+  currentUserId,
   busyAction,
   onMove,
   onRemove,
+  onSelfDrop,
 }) {
   return (
     <article className="ladder-table-card">
@@ -24,21 +26,20 @@ export default function LadderTable({
             <tr>
               <th>Rank #</th>
               <th>{ladder.name}</th>
-              {isAdmin ? <th>Admin</th> : null}
+              {isAdmin ? <th>Officer</th> : onSelfDrop ? <th>Actions</th> : null}
             </tr>
           </thead>
           <tbody>
             {entries.length ? (
               entries.map((entry, index) => (
-                <tr key={entry.entry_id}>
+                <tr key={entry.entry_id} className={entry.user_id === currentUserId || entry.partner_user_id === currentUserId ? 'ladder-row-active' : ''}>
                   <td className="rank-cell">#{entry.rank_position}</td>
                   <td>
                     <div className="team-cell">
                       <strong>{entry.team_label}</strong>
-                      <span>
-                        @{entry.username}
-                        {entry.partner_username ? ` + @${entry.partner_username}` : ''}
-                      </span>
+                      {entry.user_id === currentUserId || entry.partner_user_id === currentUserId ? (
+                        <span>Your active spot</span>
+                      ) : null}
                     </div>
                   </td>
                   {isAdmin ? (
@@ -70,12 +71,27 @@ export default function LadderTable({
                         </button>
                       </div>
                     </td>
+                  ) : onSelfDrop ? (
+                    <td>
+                      {entry.user_id === currentUserId || entry.partner_user_id === currentUserId ? (
+                        <button
+                          className="tiny-button tiny-button-danger"
+                          onClick={() => onSelfDrop(entry)}
+                          disabled={busyAction === `self-drop-${entry.entry_id}`}
+                          type="button"
+                        >
+                          Drop
+                        </button>
+                      ) : (
+                        <span className="muted-inline">-</span>
+                      )}
+                    </td>
                   ) : null}
                 </tr>
               ))
             ) : (
               <tr>
-                <td colSpan={isAdmin ? 3 : 2} className="empty-cell">
+                <td colSpan={isAdmin || onSelfDrop ? 3 : 2} className="empty-cell">
                   No players ranked yet.
                 </td>
               </tr>

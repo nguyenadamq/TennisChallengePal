@@ -71,6 +71,18 @@ export async function removeEntry(entryId) {
   })
 }
 
+export async function dropOwnEntry(entryId) {
+  return apiRequest('/api/rpc', {
+    method: 'POST',
+    body: JSON.stringify({
+      functionName: 'member_drop_own_ladder_entry',
+      payload: {
+        p_entry_id: entryId,
+      },
+    }),
+  })
+}
+
 export async function resolveRequest(requestId, decision, rank) {
   return apiRequest('/api/rpc', {
     method: 'POST',

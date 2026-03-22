@@ -8,6 +8,7 @@ const ALLOWED_RPCS = new Set([
   'admin_move_ladder_entry',
   'admin_remove_ladder_entry',
   'admin_resolve_request',
+  'member_drop_own_ladder_entry',
   'respond_to_partner_ladder_invite',
   'search_users_by_username',
   'send_friend_request',
@@ -33,8 +34,8 @@ export async function POST(request) {
       return NextResponse.json({ error: 'RPC not allowed.' }, { status: 400 })
     }
 
-    if (ADMIN_ONLY_RPCS.has(functionName) && profile.role !== 'admin') {
-      return NextResponse.json({ error: 'Admin access is required.' }, { status: 403 })
+    if (ADMIN_ONLY_RPCS.has(functionName) && profile.role !== 'officer') {
+      return NextResponse.json({ error: 'Officer access is required.' }, { status: 403 })
     }
 
     const { data, error } = await supabaseUser.rpc(functionName, payload)
