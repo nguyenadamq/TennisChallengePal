@@ -1,11 +1,12 @@
 # Tennis Challenge Pal Frontend
 
-This Vite + React app connects to Supabase for:
+This Next.js app connects to Supabase for:
 
 - Email/password signup and login
 - Role-aware dashboards for `admin` and `user` accounts
 - Live leaderboard reads through realtime subscriptions
-- RPC-driven ladder management and request workflows
+- Next API route-driven ladder management and request workflows
+- App router pages for login, signup, and dashboard
 
 Run it locally with:
 

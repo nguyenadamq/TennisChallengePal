@@ -2,7 +2,7 @@
 
 Tennis Challenge Pal is now structured as a Supabase-backed fullstack ladder app:
 
-- `frontend/`: Vite + React client
+- `frontend/`: Next.js app router frontend plus Next API routes
 - `supabase/migrations/0001_tennis_challenge_pal.sql`: database schema, RLS, RPCs, and realtime setup
 - `supabase/migrations/0002_usernames_friends_doubles.sql`: usernames, friends, notifications, doubles teams, and partner-confirmation workflow
 - `supabase/migrations/0003_username_policy_and_reset.sql`: required username policy plus destructive removal of existing signed-up users
@@ -52,8 +52,8 @@ Use the setup instructions in this file and `frontend/README.md` to connect the 
 Example:
 
 ```env
-VITE_SUPABASE_URL=https://your-project.supabase.co
-VITE_SUPABASE_ANON_KEY=your-anon-key
+NEXT_PUBLIC_SUPABASE_URL=https://your-project.supabase.co
+NEXT_PUBLIC_SUPABASE_ANON_KEY=your-anon-key
 ```
 
 ## Create The First Admin
@@ -107,6 +107,15 @@ npm install
 npm run dev
 ```
 
+The app runs locally at `http://localhost:5173`.
+
+## App Architecture
+
+- Next.js app router serves the UI pages
+- Next.js API routes proxy dashboard reads and RPC mutations
+- Supabase Auth still handles signup, login, and sessions
+- Supabase Postgres still stores the data, policies, and business rules
+
 ## Product Assumption
 
 Singles ladders are individual entries. Doubles ladders are now team entries, so if someone drops a doubles ladder as part of a new request, the whole team entry is removed when that new request is approved.
@@ -115,7 +124,7 @@ Singles ladders are individual entries. Doubles ladders are now team entries, so
 
 This app is built to avoid SQL injection:
 
-- The React app uses the Supabase client query builder and RPC calls, not raw string-concatenated SQL.
+- The Next.js app uses typed API requests and Supabase RPC calls, not raw string-concatenated SQL.
 - The database functions in [0001_tennis_challenge_pal.sql](C:\Users\User\Documents\GitHub\TennisChallengePal\supabase\migrations\0001_tennis_challenge_pal.sql) do not use dynamic SQL like `execute`.
 - User input is passed as typed function parameters into Postgres.
 - Role-sensitive operations such as admin promotion, entry moves, request approval, and manual ladder changes are done through protected `security definer` functions with explicit checks.

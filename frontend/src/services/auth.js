@@ -1,4 +1,5 @@
 import { supabase } from '../lib/supabaseClient'
+import { apiRequest } from '../lib/apiClient'
 
 function delay(ms) {
   return new Promise((resolve) => {
@@ -6,18 +7,17 @@ function delay(ms) {
   })
 }
 
-async function fetchProfileOnce(userId) {
-  const { data, error } = await supabase
-    .from('profiles')
-    .select('id, email, display_name, username, gender, role, created_at')
-    .eq('id', userId)
-    .maybeSingle()
+async function fetchProfileOnce() {
+  try {
+    const result = await apiRequest('/api/profile')
+    return result.profile
+  } catch (error) {
+    if (error.message === 'Profile not found for this account.') {
+      return null
+    }
 
-  if (error) {
     throw error
   }
-
-  return data
 }
 
 export async function signUp({ email, password, displayName, username, gender }) {
@@ -68,8 +68,8 @@ export async function signOut() {
   }
 }
 
-export async function getProfile(userId) {
-  const profile = await fetchProfileOnce(userId)
+export async function getProfile(_userId) {
+  const profile = await fetchProfileOnce()
 
   if (!profile) {
     throw new Error('Profile not found for this account.')
@@ -78,9 +78,9 @@ export async function getProfile(userId) {
   return profile
 }
 
-export async function waitForProfile(userId, attempts = 8) {
+export async function waitForProfile(_userId, attempts = 8) {
   for (let index = 0; index < attempts; index += 1) {
-    const profile = await fetchProfileOnce(userId)
+    const profile = await fetchProfileOnce()
 
     if (profile) {
       return profile
@@ -95,11 +95,11 @@ export async function waitForProfile(userId, attempts = 8) {
 }
 
 export async function claimAdminRole(password) {
-  const { error } = await supabase.rpc('claim_admin_role', {
-    p_password: password,
+  await apiRequest('/api/rpc', {
+    method: 'POST',
+    body: JSON.stringify({
+      functionName: 'claim_admin_role',
+      payload: { p_password: password },
+    }),
   })
-
-  if (error) {
-    throw error
-  }
 }
