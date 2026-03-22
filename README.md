@@ -9,6 +9,7 @@ Tennis Challenge Pal is now structured as a Supabase-backed fullstack ladder app
 - `supabase/migrations/0004_fix_ladder_limit_ambiguity.sql`: resolves the duplicate ladder-limit function issue during admin approvals
 - `supabase/migrations/0005_fix_notification_signature.sql`: fixes notification creation when admin approvals or rejections send updates
 - `supabase/migrations/0006_fix_friend_request_status_cast.sql`: fixes accepting or declining friend requests when enum status writes were treated as text
+- `supabase/migrations/0007_allow_partner_to_read_ladder_requests.sql`: lets invited doubles partners actually see pending partner invites in the app
 
 Use the setup instructions in this file and `frontend/README.md` to connect the app to your Supabase project.
 
@@ -40,12 +41,13 @@ Use the setup instructions in this file and `frontend/README.md` to connect the 
 6. Then run the SQL from `supabase/migrations/0004_fix_ladder_limit_ambiguity.sql`.
 7. Then run the SQL from `supabase/migrations/0005_fix_notification_signature.sql`.
 8. Then run the SQL from `supabase/migrations/0006_fix_friend_request_status_cast.sql`.
-9. In `Authentication > Providers`, keep `Email` enabled.
-10. In `Authentication > URL Configuration`, add:
+9. Then run the SQL from `supabase/migrations/0007_allow_partner_to_read_ladder_requests.sql`.
+10. In `Authentication > Providers`, keep `Email` enabled.
+11. In `Authentication > URL Configuration`, add:
    - `http://localhost:5173` as a site URL for local development
    - `http://localhost:5173/**` as an additional redirect URL if you want email confirmation links to return to the app
-11. Copy your project URL and anon key from `Project Settings > API`.
-12. Create `frontend/.env` using `frontend/.env.example`.
+12. Copy your project URL and anon key from `Project Settings > API`.
+13. Create `frontend/.env` using `frontend/.env.example`.
 
 Example:
 

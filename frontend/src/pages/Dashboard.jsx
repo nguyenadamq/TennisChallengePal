@@ -431,6 +431,26 @@ export default function Dashboard() {
     navItems.push({ id: 'admin', label: 'Admin' })
   }
 
+  function getNotificationPartnerInvite(notification) {
+    const requestId = notification.metadata?.ladder_request_id
+
+    if (!requestId) {
+      return null
+    }
+
+    return partnerInvites.find((request) => request.request_id === requestId) ?? null
+  }
+
+  function getNotificationFriendRequest(notification) {
+    const requestId = notification.metadata?.friend_request_id
+
+    if (!requestId) {
+      return null
+    }
+
+    return incomingFriendRequests.find((request) => request.request_id === requestId) ?? null
+  }
+
   return (
     <main className="dashboard-shell">
       <section className="topbar">
@@ -950,32 +970,145 @@ export default function Dashboard() {
               <h2>Recent updates</h2>
               <div className="notification-list">
                 {notifications.length ? (
-                  notifications.map((notification) => (
-                    <div key={notification.id} className="notification-item">
-                      <div>
-                        <strong>{notification.title}</strong>
-                        <p>{notification.body}</p>
-                      </div>
-                      {notification.read_at ? (
-                        <span className="status-pill">Read</span>
-                      ) : (
-                        <button
-                          className="tiny-button"
-                          type="button"
-                          disabled={busyAction === `notification-${notification.id}`}
-                          onClick={() =>
-                            runAction(
-                              `notification-${notification.id}`,
-                              () => markNotificationRead(notification.id),
-                              'Notification marked as read.',
+                  notifications.map((notification) => {
+                    const partnerInvite = getNotificationPartnerInvite(notification)
+                    const friendRequest = getNotificationFriendRequest(notification)
+                    const inviteDropOptions = partnerInvite ? getDropOptionsForUser(profile.id) : []
+                    const needsInviteDropChoice = inviteDropOptions.length >= 2
+
+                    return (
+                      <div key={notification.id} className="notification-item">
+                        <div>
+                          <strong>{notification.title}</strong>
+                          <p>{notification.body}</p>
+                          {partnerInvite ? (
+                            <>
+                              <p className="muted-text">
+                                Pending doubles invite for {partnerInvite.ladder_name} from @{partnerInvite.requester_username}.
+                              </p>
+                              {needsInviteDropChoice ? (
+                                <div className="inline-field">
+                                  <select
+                                    value={inviteDropChoices[partnerInvite.request_id] || ''}
+                                    onChange={(event) =>
+                                      setInviteDropChoices((current) => ({
+                                        ...current,
+                                        [partnerInvite.request_id]: event.target.value,
+                                      }))
+                                    }
+                                  >
+                                    <option value="">Choose the ladder to drop if approved</option>
+                                    {inviteDropOptions.map((option) => (
+                                      <option key={option.ladderCode} value={option.ladderCode}>
+                                        {option.label}
+                                      </option>
+                                    ))}
+                                  </select>
+                                </div>
+                              ) : null}
+                            </>
+                          ) : null}
+                          {friendRequest ? (
+                            <p className="muted-text">You can respond to this friend request directly here.</p>
+                          ) : null}
+                        </div>
+                        <div className="inline-actions">
+                          {partnerInvite ? (
+                            <>
+                              <button
+                                className="tiny-button"
+                                type="button"
+                                disabled={
+                                  busyAction === `notification-invite-accept-${partnerInvite.request_id}` ||
+                                  (needsInviteDropChoice && !inviteDropChoices[partnerInvite.request_id])
+                                }
+                                onClick={() =>
+                                  runAction(
+                                    `notification-invite-accept-${partnerInvite.request_id}`,
+                                    () =>
+                                      respondToPartnerInvite(
+                                        partnerInvite.request_id,
+                                        true,
+                                        inviteDropChoices[partnerInvite.request_id] || null,
+                                      ),
+                                    'Invite accepted and sent to admins.',
+                                  )
+                                }
+                              >
+                                Accept
+                              </button>
+                              <button
+                                className="tiny-button tiny-button-danger"
+                                type="button"
+                                disabled={busyAction === `notification-invite-decline-${partnerInvite.request_id}`}
+                                onClick={() =>
+                                  runAction(
+                                    `notification-invite-decline-${partnerInvite.request_id}`,
+                                    () => respondToPartnerInvite(partnerInvite.request_id, false, null),
+                                    'Invite declined.',
+                                  )
+                                }
+                              >
+                                Decline
+                              </button>
+                            </>
+                          ) : null}
+                          {friendRequest ? (
+                            <>
+                              <button
+                                className="tiny-button"
+                                type="button"
+                                disabled={busyAction === `notification-friend-accept-${friendRequest.request_id}`}
+                                onClick={() =>
+                                  runAction(
+                                    `notification-friend-accept-${friendRequest.request_id}`,
+                                    () => respondToFriendRequest(friendRequest.request_id, true),
+                                    'Friend request accepted.',
+                                  )
+                                }
+                              >
+                                Accept
+                              </button>
+                              <button
+                                className="tiny-button tiny-button-danger"
+                                type="button"
+                                disabled={busyAction === `notification-friend-decline-${friendRequest.request_id}`}
+                                onClick={() =>
+                                  runAction(
+                                    `notification-friend-decline-${friendRequest.request_id}`,
+                                    () => respondToFriendRequest(friendRequest.request_id, false),
+                                    'Friend request declined.',
+                                  )
+                                }
+                              >
+                                Decline
+                              </button>
+                            </>
+                          ) : null}
+                          {!partnerInvite && !friendRequest ? (
+                            notification.read_at ? (
+                              <span className="status-pill">Read</span>
+                            ) : (
+                              <button
+                                className="tiny-button"
+                                type="button"
+                                disabled={busyAction === `notification-${notification.id}`}
+                                onClick={() =>
+                                  runAction(
+                                    `notification-${notification.id}`,
+                                    () => markNotificationRead(notification.id),
+                                    'Notification marked as read.',
+                                  )
+                                }
+                              >
+                                Mark read
+                              </button>
                             )
-                          }
-                        >
-                          Mark read
-                        </button>
-                      )}
-                    </div>
-                  ))
+                          ) : null}
+                        </div>
+                      </div>
+                    )
+                  })
                 ) : (
                   <p className="muted-text">No notifications yet.</p>
                 )}
