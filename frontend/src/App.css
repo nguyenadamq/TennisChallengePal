@@ -453,6 +453,24 @@
   padding: 0.85rem 0;
 }
 
+.section-toggle {
+  width: 100%;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 1rem;
+  border: 0;
+  background: transparent;
+  color: var(--color-text);
+  padding: 0;
+  cursor: pointer;
+  text-align: left;
+}
+
+.section-toggle h2 {
+  margin: 0;
+}
+
 .notification-item:not(:last-child) {
   border-bottom: 1px solid rgba(255, 255, 255, 0.08);
 }
