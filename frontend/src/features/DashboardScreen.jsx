@@ -39,12 +39,12 @@ const adminDefaults = {
   rankPosition: '',
 }
 
-function formatStatus(value) {
-  return value.replaceAll('_', ' ')
-}
-
 function formatRoleLabel(value) {
   return value === 'officer' ? 'Officer' : 'Member'
+}
+
+function formatGenderShort(value) {
+  return value === 'female' ? 'F' : 'M'
 }
 
 function HomeTab({
@@ -60,13 +60,11 @@ function HomeTab({
       <section className="info-grid">
         <article className="panel">
           <p className="eyebrow">How It Works</p>
-          <h2>Club rules</h2>
           <p>{LADDER_RULE_COPY[profile.gender].summary}</p>
           <p className="muted-text">{LADDER_RULE_COPY[profile.gender].challenge}</p>
         </article>
         <article className="panel">
           <p className="eyebrow">Doubles Requests</p>
-          <h2>Partner flow</h2>
           <p>Invite a confirmed friend for doubles. Your friend must accept before the request moves to officers.</p>
           <p className="muted-text">
             If either player is already on two ladders, they choose which ladder will drop only if the officer later approves the request.
@@ -84,7 +82,7 @@ function HomeTab({
                 </div>
               ))
             ) : (
-              <p className="muted-text">No active ladder spots yet.</p>
+              null
             )}
           </div>
         </article>
@@ -95,21 +93,20 @@ function HomeTab({
           <div className="section-heading">
             <div>
               <p className="eyebrow">Start Here</p>
-              <h2>What to do next</h2>
             </div>
           </div>
           <div className="mini-list">
-            <div className="mini-item">
-              <strong>Browse live ladders</strong>
-              <span>Use the Leaderboards tab to view all rankings, your active ladders, and submit requests.</span>
+            <div className="mini-item start-here-row">
+              <strong className="start-here-title">Browse live ladders</strong>
+              <span className="start-here-copy">Use the Leaderboards tab to view all rankings, your active ladders, and submit requests.</span>
             </div>
-            <div className="mini-item">
-              <strong>Add friends</strong>
-              <span>Use the Friends tab to search usernames, accept requests, manage partner invites, and review notifications.</span>
+            <div className="mini-item start-here-row">
+              <strong className="start-here-title">Add friends</strong>
+              <span className="start-here-copy">Use the Friends tab to search usernames, accept requests, manage partner invites, and review notifications.</span>
             </div>
-            <div className="mini-item">
-              <strong>Request a ladder move</strong>
-              <span>Join or challenge from Leaderboards, then track status in your request list.</span>
+            <div className="mini-item start-here-row">
+              <strong className="start-here-title">Request a ladder move</strong>
+              <span className="start-here-copy">Join or challenge from Leaderboards, then track status in your request list.</span>
             </div>
           </div>
         </div>
@@ -123,7 +120,6 @@ function HomeTab({
             ) : (
               <form className="form-stack compact-form" onSubmit={handleAdminPromotion}>
                 <label>
-                  <span>Shared officer password</span>
                   <input
                     type="password"
                     value={adminPromotionPassword}
@@ -170,7 +166,9 @@ export default function Dashboard() {
   const [adminRankInputs, setAdminRankInputs] = useState({})
   const [activeTab, setActiveTab] = useState('home')
   const [archivedNotificationsOpen, setArchivedNotificationsOpen] = useState(false)
+  const [notificationsOpen, setNotificationsOpen] = useState(false)
   const [dropConfirmEntry, setDropConfirmEntry] = useState(null)
+  const [expandedSelfDropEntryId, setExpandedSelfDropEntryId] = useState(null)
   const router = useRouter()
 
   const loadDashboard = useCallback(async () => {
@@ -417,8 +415,19 @@ export default function Dashboard() {
     )
   }
 
+  async function handleInlineSelfDrop(entry) {
+    await runAction(
+      `self-drop-${entry.entry_id}`,
+      async () => {
+        await dropOwnEntry(entry.entry_id)
+        setExpandedSelfDropEntryId(null)
+      },
+      'Your ladder spot was dropped.',
+    )
+  }
+
   if (loading) {
-    return <div className="app-loading">Loading Tennis Challenge Pal...</div>
+    return <div className="app-loading">Loading Challenge Court...</div>
   }
 
   if (!profile) {
@@ -431,9 +440,6 @@ export default function Dashboard() {
   )
   const partnerInvites = requests.filter(
     (request) => request.partner_user_id === profile.id && request.status === 'pending_partner',
-  )
-  const ownRequests = requests.filter(
-    (request) => request.requester_id === profile.id || request.partner_user_id === profile.id,
   )
   const adminRequests = requests.filter((request) => request.status === 'pending_admin')
   const unreadNotifications = notifications.filter((item) => !item.read_at)
@@ -463,17 +469,126 @@ export default function Dashboard() {
     <main className="dashboard-shell">
       <section className="topbar">
         <div>
-          <p className="eyebrow">Tennis Challenge Pal</p>
-          <h1>Live ladder center</h1>
-          <p className="topbar-copy">
-            Username-based friends, doubles invites, officer review, and readable ladder boards in one place.
-          </p>
+          <h1 className="brand-title">Challenge Court</h1>
         </div>
 
         <div className="topbar-actions">
-          <div className="profile-chip">
-            <strong>{profile.display_name}</strong>
-            <span>@{profile.username} | {formatRoleLabel(profile.role)} | {profile.gender}</span>
+          <div className="profile-area">
+            <div className="notification-anchor">
+              <div className="profile-chip">
+                <strong>
+                  {profile.display_name} - {formatGenderShort(profile.gender)}
+                </strong>
+                <span>
+                  {profile.username} - {formatRoleLabel(profile.role)}
+                </span>
+                <button
+                  className="notification-bell"
+                  type="button"
+                  onClick={() => setNotificationsOpen((current) => !current)}
+                  aria-label="Notifications"
+                >
+                  <svg
+                    className="notification-bell-icon"
+                    viewBox="0 0 24 24"
+                    aria-hidden="true"
+                  >
+                    <path
+                      d="M12 3.5a4 4 0 0 0-4 4v1.2c0 .9-.3 1.8-.8 2.5L5.7 13a1.2 1.2 0 0 0 .9 2h10.8a1.2 1.2 0 0 0 .9-2l-1.5-1.8a4.3 4.3 0 0 1-.8-2.5V7.5a4 4 0 0 0-4-4Z"
+                      fill="none"
+                      stroke="currentColor"
+                      strokeWidth="1.8"
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                    />
+                    <path
+                      d="M9.8 18a2.4 2.4 0 0 0 4.4 0"
+                      fill="none"
+                      stroke="currentColor"
+                      strokeWidth="1.8"
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                    />
+                  </svg>
+                  {unreadCount ? <span className="notification-badge">{unreadCount}</span> : null}
+                </button>
+              </div>
+              {notificationsOpen ? (
+                <div className="notification-popover">
+                  <div className="notification-popover-header">
+                    <div>
+                      <p className="eyebrow">Notifications</p>
+                      <h2>Unread updates</h2>
+                    </div>
+                    <button
+                      className="tiny-button"
+                      type="button"
+                      onClick={() => setNotificationsOpen(false)}
+                    >
+                      Close
+                    </button>
+                  </div>
+                  <div className="notification-list">
+                    {unreadNotifications.length ? (
+                      unreadNotifications.map((notification) => (
+                        <div key={notification.id} className="notification-item">
+                          <div>
+                            <strong>{notification.title}</strong>
+                            <p>{notification.body}</p>
+                          </div>
+                          <button
+                            className="tiny-button"
+                            type="button"
+                            disabled={busyAction === `notification-${notification.id}`}
+                            onClick={() =>
+                              runAction(
+                                `notification-${notification.id}`,
+                                () => markNotificationRead(notification.id),
+                                'Notification archived.',
+                              )
+                            }
+                          >
+                            Mark read
+                          </button>
+                        </div>
+                      ))
+                    ) : (
+                      <p className="muted-text">No unread notifications right now.</p>
+                    )}
+                  </div>
+                  <button
+                    className="section-toggle"
+                    type="button"
+                    onClick={() => setArchivedNotificationsOpen((current) => !current)}
+                  >
+                    <span>
+                      <span className="eyebrow">Archive</span>
+                      <h2>Archived notifications</h2>
+                    </span>
+                    <span className="count-pill">
+                      {archivedNotifications.length} {archivedNotificationsOpen ? 'Hide' : 'Show'}
+                    </span>
+                  </button>
+                  {archivedNotificationsOpen ? (
+                    <div className="notification-list">
+                      {archivedNotifications.length ? (
+                        archivedNotifications.map((notification) => (
+                          <div key={notification.id} className="notification-item">
+                            <div>
+                              <strong>{notification.title}</strong>
+                              <p>{notification.body}</p>
+                            </div>
+                            <span className="status-pill">Archived</span>
+                          </div>
+                        ))
+                      ) : (
+                        <p className="muted-text">No archived notifications yet.</p>
+                      )}
+                    </div>
+                  ) : null}
+                </div>
+              ) : null}
+            </div>
           </div>
           <button className="secondary-button" onClick={handleSignOut} type="button">
             Sign out
@@ -511,43 +626,33 @@ export default function Dashboard() {
 
       {activeTab === 'leaderboards' ? (
         <>
-          <section className="info-grid">
-            <article className="panel">
+          <section className="panel active-ladders-bar">
+            <div className="active-ladders-bar-header">
               <p className="eyebrow">Your Active Ladders</p>
               <h2>{myEntries.length} of 2</h2>
-              <div className="mini-list">
-                {myEntries.length ? (
-                  myEntries.map((entry) => (
-                    <div key={entry.entry_id} className="mini-item">
-                      <div>
-                        <strong>{entry.ladder_name}</strong>
-                        <span>Rank #{entry.rank_position}</span>
-                      </div>
-                      <button
-                        className="tiny-button tiny-button-danger"
-                        type="button"
-                        disabled={busyAction === `self-drop-${entry.entry_id}`}
-                        onClick={() => setDropConfirmEntry(entry)}
-                      >
-                        Drop spot
-                      </button>
+            </div>
+            <div className="active-ladders-bar-list">
+              {myEntries.length ? (
+                myEntries.map((entry) => (
+                  <div key={entry.entry_id} className="active-ladders-chip">
+                    <div>
+                      <strong>{entry.ladder_name}</strong>
+                      <span>Rank #{entry.rank_position}</span>
                     </div>
-                  ))
-                ) : (
-                  <p className="muted-text">No active ladder spots yet.</p>
-                )}
-              </div>
-            </article>
-            <article className="panel">
-              <p className="eyebrow">Eligibility</p>
-              <h2>@{profile.username}</h2>
-              <p>{LADDER_RULE_COPY[profile.gender].summary}</p>
-            </article>
-            <article className="panel">
-              <p className="eyebrow">Request Status</p>
-              <h2>{ownRequests.length}</h2>
-              <p className="muted-text">Track your join, challenge, and doubles partner requests below.</p>
-            </article>
+                    <button
+                      className="tiny-button tiny-button-danger"
+                      type="button"
+                      disabled={busyAction === `self-drop-${entry.entry_id}`}
+                      onClick={() => setDropConfirmEntry(entry)}
+                    >
+                      Drop spot
+                    </button>
+                  </div>
+                ))
+              ) : (
+                <p className="muted-text">No active ladder spots yet.</p>
+              )}
+            </div>
           </section>
 
           <section className="content-grid">
@@ -555,7 +660,6 @@ export default function Dashboard() {
               <div className="section-heading">
                 <div>
                   <p className="eyebrow">Leaderboard View</p>
-                  <h2>Club ladders</h2>
                 </div>
               </div>
               <div className="ladder-board-stack">
@@ -569,16 +673,21 @@ export default function Dashboard() {
                     busyAction={busyAction}
                     onMove={() => {}}
                     onRemove={() => {}}
-                    onSelfDrop={(entry) => setDropConfirmEntry(entry)}
+                    expandedSelfDropEntryId={expandedSelfDropEntryId}
+                    onToggleSelfDrop={(entryId) =>
+                      setExpandedSelfDropEntryId((current) =>
+                        current === entryId ? null : entryId,
+                      )
+                    }
+                    onConfirmSelfDrop={handleInlineSelfDrop}
                   />
                 ))}
               </div>
             </div>
 
             <aside className="sidebar-stack">
-              <section className="panel">
+              <section className="panel leaderboard-request-panel">
                 <p className="eyebrow">Join or Challenge</p>
-                <h2>Submit a ladder request</h2>
                 <form className="form-stack compact-form" onSubmit={handleRequestSubmit}>
                   <label>
                     <span>Ladder</span>
@@ -693,7 +802,7 @@ export default function Dashboard() {
                   <label>
                     <span>Message for officers</span>
                     <textarea
-                      rows="4"
+                      rows="3"
                       value={requestForm.message}
                       onChange={(event) =>
                         setRequestForm((current) => ({
@@ -724,35 +833,6 @@ export default function Dashboard() {
                   </button>
                 </form>
               </section>
-
-              <section className="panel">
-                <p className="eyebrow">Your Requests</p>
-                <h2>{ownRequests.length} tracked items</h2>
-                <div className="request-list">
-                  {ownRequests.length ? (
-                    ownRequests.map((request) => (
-                      <div key={request.request_id} className="request-item">
-                        <div>
-                          <strong>{request.ladder_name}</strong>
-                          <p>
-                            {request.request_type} | {formatStatus(request.status)}
-                            {request.partner_username ? ` | @${request.partner_username}` : ''}
-                          </p>
-                          {request.requester_drop_ladder_name ? (
-                            <p className="muted-text">Your drop choice: {request.requester_drop_ladder_name}</p>
-                          ) : null}
-                          {request.partner_user_id === profile.id && request.partner_drop_ladder_name ? (
-                            <p className="muted-text">Your drop choice: {request.partner_drop_ladder_name}</p>
-                          ) : null}
-                        </div>
-                        <span className={`status-pill status-${request.status}`}>{formatStatus(request.status)}</span>
-                      </div>
-                    ))
-                  ) : (
-                    <p className="muted-text">No request history yet.</p>
-                  )}
-                </div>
-              </section>
             </aside>
           </section>
         </>
@@ -760,31 +840,32 @@ export default function Dashboard() {
 
       {activeTab === 'friends' ? (
         <>
-          <section className="info-grid">
-            <article className="panel">
-              <p className="eyebrow">Friends</p>
-              <h2>{friends.length}</h2>
-              <p className="muted-text">Confirmed friends can receive doubles partner invites.</p>
-            </article>
-            <article className="panel">
-              <p className="eyebrow">Pending</p>
-              <h2>{pendingSocialCount}</h2>
-              <p className="muted-text">Incoming friend requests and doubles partner invites waiting on you.</p>
-            </article>
-            <article className="panel">
-              <p className="eyebrow">Notifications</p>
-              <h2>{unreadCount}</h2>
-              <p className="muted-text">Unread updates about friends, invites, and approvals.</p>
-            </article>
-          </section>
-
           <section className="friends-grid">
+            <article className="panel panel-subtle">
+              <p className="eyebrow">Friends List</p>
+              <div className="request-list">
+                {friends.length ? (
+                  friends.map((friend) => (
+                    <div key={friend.friend_id} className="request-item">
+                      <div>
+                        <strong>{friend.friend_display_name}</strong>
+                        <p>
+                          @{friend.friend_username} | {friend.friend_gender}
+                        </p>
+                      </div>
+                    </div>
+                  ))
+                ) : (
+                  <p className="muted-text">No confirmed friends yet.</p>
+                )}
+              </div>
+            </article>
+
             <article className="panel panel-subtle">
               <p className="eyebrow">Search Usernames</p>
               <h2>Find new friends</h2>
               <form className="form-stack compact-form" onSubmit={handleFriendSearch}>
                 <label>
-                  <span>Username</span>
                   <input
                     type="text"
                     value={friendSearch}
@@ -823,35 +904,22 @@ export default function Dashboard() {
                     </div>
                   ))
                 ) : (
-                <p className="muted-text">Search a username to send a friend request.</p>
+                  null
                 )}
               </div>
             </article>
 
-            <article className="panel panel-subtle">
-              <p className="eyebrow">Friends List</p>
-              <h2>Confirmed friends</h2>
-              <div className="request-list">
-                {friends.length ? (
-                  friends.map((friend) => (
-                    <div key={friend.friend_id} className="request-item">
-                      <div>
-                        <strong>{friend.friend_display_name}</strong>
-                        <p>
-                          @{friend.friend_username} | {friend.friend_gender}
-                        </p>
-                      </div>
-                    </div>
-                  ))
-                ) : (
-                  <p className="muted-text">No confirmed friends yet.</p>
-                )}
-              </div>
+            <article className="panel">
+              <p className="eyebrow">Friends</p>
+              <h2>{friends.length}</h2>
+            </article>
+            <article className="panel">
+              <p className="eyebrow">Pending</p>
+              <h2>{pendingSocialCount}</h2>
             </article>
 
             <article className="panel panel-subtle">
               <p className="eyebrow">Friend Requests</p>
-              <h2>Waiting on you</h2>
               <div className="request-list">
                 {incomingFriendRequests.length ? (
                   incomingFriendRequests.map((request) => (
@@ -900,7 +968,6 @@ export default function Dashboard() {
 
             <article className="panel panel-subtle">
               <p className="eyebrow">Doubles Invites</p>
-              <h2>Partner confirmations</h2>
               <div className="request-list">
                 {partnerInvites.length ? (
                   partnerInvites.map((request) => {
@@ -985,71 +1052,6 @@ export default function Dashboard() {
               </div>
             </article>
 
-            <article className="panel panel-subtle friends-notifications">
-              <p className="eyebrow">Notifications</p>
-              <h2>Unread updates</h2>
-              <div className="notification-list">
-                {unreadNotifications.length ? (
-                  unreadNotifications.map((notification) => (
-                    <div key={notification.id} className="notification-item">
-                      <div>
-                        <strong>{notification.title}</strong>
-                        <p>{notification.body}</p>
-                      </div>
-                      <button
-                        className="tiny-button"
-                        type="button"
-                        disabled={busyAction === `notification-${notification.id}`}
-                        onClick={() =>
-                          runAction(
-                            `notification-${notification.id}`,
-                            () => markNotificationRead(notification.id),
-                            'Notification archived.',
-                          )
-                        }
-                      >
-                        Mark read
-                      </button>
-                    </div>
-                  ))
-                ) : (
-                  <p className="muted-text">No unread notifications right now.</p>
-                )}
-              </div>
-            </article>
-
-            <article className="panel panel-subtle friends-notifications">
-              <button
-                className="section-toggle"
-                type="button"
-                onClick={() => setArchivedNotificationsOpen((current) => !current)}
-              >
-                <span>
-                  <span className="eyebrow">Archive</span>
-                  <h2>Archived notifications</h2>
-                </span>
-                <span className="count-pill">
-                  {archivedNotifications.length} {archivedNotificationsOpen ? 'Hide' : 'Show'}
-                </span>
-              </button>
-              {archivedNotificationsOpen ? (
-                <div className="notification-list">
-                  {archivedNotifications.length ? (
-                    archivedNotifications.map((notification) => (
-                      <div key={notification.id} className="notification-item">
-                        <div>
-                          <strong>{notification.title}</strong>
-                          <p>{notification.body}</p>
-                        </div>
-                        <span className="status-pill">Archived</span>
-                      </div>
-                    ))
-                  ) : (
-                    <p className="muted-text">No archived notifications yet.</p>
-                  )}
-                </div>
-              ) : null}
-            </article>
           </section>
         </>
       ) : null}

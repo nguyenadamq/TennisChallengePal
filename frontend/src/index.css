@@ -1,22 +1,21 @@
 @import "tailwindcss";
 
 :root {
-  font-family: "Segoe UI", "Trebuchet MS", sans-serif;
-  color: #f5f1e8;
+  color: #1f2937;
   background:
-    radial-gradient(circle at top left, rgba(248, 182, 86, 0.18), transparent 28%),
-    radial-gradient(circle at top right, rgba(96, 168, 131, 0.16), transparent 25%),
-    linear-gradient(160deg, #123524 0%, #0c1f18 55%, #08140f 100%);
-  --color-surface: rgba(9, 24, 18, 0.76);
-  --color-surface-strong: rgba(15, 38, 28, 0.92);
-  --color-border: rgba(245, 241, 232, 0.12);
-  --color-text: #f5f1e8;
-  --color-muted: #b6c6bb;
-  --color-accent: #f5b249;
-  --color-accent-strong: #ffcb73;
-  --color-danger: #ff8f7d;
-  --color-success: #88d498;
-  --color-shadow: rgba(0, 0, 0, 0.28);
+    radial-gradient(circle at top left, rgba(0, 184, 217, 0.26), transparent 26%),
+    radial-gradient(circle at top right, rgba(247, 37, 133, 0.18), transparent 24%),
+    linear-gradient(155deg, #fff4e6 0%, #f7fbff 44%, #d9f6ff 100%);
+  --color-surface: rgba(255, 244, 230, 0.76);
+  --color-surface-strong: rgba(255, 244, 230, 0.9);
+  --color-border: rgba(0, 119, 182, 0.18);
+  --color-text: #1f2937;
+  --color-muted: #4b5563;
+  --color-accent: #0077b6;
+  --color-accent-strong: #00b8d9;
+  --color-danger: #f72585;
+  --color-success: #00b8d9;
+  --color-shadow: rgba(0, 119, 182, 0.14);
 }
 
 * {
@@ -31,9 +30,10 @@ html {
 body {
   min-height: 100vh;
   margin: 0;
+  font-family: "Sora", "Segoe UI", "Trebuchet MS", sans-serif;
   background:
-    linear-gradient(135deg, rgba(255, 255, 255, 0.04), transparent 40%),
-    linear-gradient(180deg, rgba(255, 255, 255, 0.02), transparent 100%);
+    linear-gradient(135deg, rgba(0, 184, 217, 0.16), transparent 38%),
+    linear-gradient(180deg, rgba(247, 37, 133, 0.08), transparent 100%);
   color: var(--color-text);
 }
 
@@ -43,8 +43,8 @@ body::before {
   inset: 0;
   pointer-events: none;
   background-image:
-    linear-gradient(rgba(255, 255, 255, 0.02) 1px, transparent 1px),
-    linear-gradient(90deg, rgba(255, 255, 255, 0.02) 1px, transparent 1px);
+    linear-gradient(rgba(0, 119, 182, 0.04) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(0, 119, 182, 0.04) 1px, transparent 1px);
   background-size: 64px 64px;
   mask-image: linear-gradient(180deg, rgba(0, 0, 0, 0.65), transparent 92%);
 }

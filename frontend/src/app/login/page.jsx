@@ -6,7 +6,7 @@ export const dynamic = 'force-dynamic'
 
 const Login = nextDynamic(() => import('../../features/LoginScreen'), {
   ssr: false,
-  loading: () => <div className="app-loading">Loading Tennis Challenge Pal...</div>,
+  loading: () => <div className="app-loading">Loading Challenge Court...</div>,
 })
 
 export default function LoginPage() {

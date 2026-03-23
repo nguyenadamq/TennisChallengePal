@@ -31,5 +31,5 @@ export default function HomePage() {
     }
   }, [router])
 
-  return <div className="app-loading">Loading Tennis Challenge Pal...</div>
+  return <div className="app-loading">Loading Challenge Court...</div>
 }

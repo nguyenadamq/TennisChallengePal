@@ -65,7 +65,7 @@ export default function Login() {
     <main className="auth-shell">
       <section className="auth-hero">
         <p className="eyebrow">Live Club Rankings</p>
-        <h1>Tennis Challenge Pal</h1>
+        <h1>Challenge Court</h1>
         <p className="auth-copy">
           Run every ladder from one place. Officers manage rankings and requests,
           and members track live standings across singles, doubles, and mixed.
