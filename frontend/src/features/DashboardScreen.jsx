@@ -518,7 +518,6 @@ export default function Dashboard() {
                   <div className="notification-popover-header">
                     <div>
                       <p className="eyebrow">Notifications</p>
-                      <h2>Unread updates</h2>
                     </div>
                     <button
                       className="tiny-button"
@@ -562,8 +561,7 @@ export default function Dashboard() {
                     onClick={() => setArchivedNotificationsOpen((current) => !current)}
                   >
                     <span>
-                      <span className="eyebrow">Archive</span>
-                      <h2>Archived notifications</h2>
+                      <span className="eyebrow">Archived</span>
                     </span>
                     <span className="count-pill">
                       {archivedNotifications.length} {archivedNotificationsOpen ? 'Hide' : 'Show'}
@@ -862,8 +860,7 @@ export default function Dashboard() {
             </article>
 
             <article className="panel panel-subtle">
-              <p className="eyebrow">Search Usernames</p>
-              <h2>Find new friends</h2>
+              <p className="eyebrow">Add Friend</p>
               <form className="form-stack compact-form" onSubmit={handleFriendSearch}>
                 <label>
                   <input
