@@ -181,6 +181,7 @@ export default function Signup() {
               onChange={(event) => updateField('email', event.target.value)}
               placeholder="player@club.com"
               required
+              autoComplete="email"
             />
           </label>
 
@@ -192,9 +193,14 @@ export default function Signup() {
               onChange={(event) => updateField('password', event.target.value)}
               placeholder="Create a strong password"
               required
-              minLength={8}
+              minLength={12}
+              maxLength={128}
+              autoComplete="new-password"
             />
           </label>
+          <p className="muted-text">
+            Use at least 12 characters with uppercase, lowercase, and a number.
+          </p>
 
           <label>
             <span>Gender</span>

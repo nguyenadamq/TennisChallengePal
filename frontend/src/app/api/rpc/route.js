@@ -1,54 +1,403 @@
 import { NextResponse } from 'next/server'
 import { requireProfile } from '../../../lib/serverSupabase'
+import { consumeRateLimit } from '../../../lib/rateLimit'
 
-const ALLOWED_RPCS = new Set([
-  'claim_admin_role',
-  'submit_ladder_request',
-  'admin_add_user_to_ladder',
-  'admin_move_ladder_entry',
-  'admin_remove_ladder_entry',
-  'admin_resolve_request',
-  'member_drop_own_ladder_entry',
-  'respond_to_partner_ladder_invite',
-  'search_users_by_username',
-  'send_friend_request',
-  'respond_to_friend_request',
-  'mark_notification_read',
+const JSON_HEADERS = {
+  'Cache-Control': 'no-store',
+}
+
+const LADDER_CODES = new Set([
+  'mens_singles',
+  'mens_doubles',
+  'mixed_doubles',
+  'womens_singles',
+  'womens_doubles',
 ])
 
-const ADMIN_ONLY_RPCS = new Set([
-  'admin_add_user_to_ladder',
-  'admin_move_ladder_entry',
-  'admin_remove_ladder_entry',
-  'admin_resolve_request',
-])
+const REQUEST_TYPES = new Set(['join', 'challenge'])
+const REQUEST_DECISIONS = new Set(['approved', 'rejected'])
+const UUID_PATTERN =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i
+const USERNAME_PATTERN = /^[a-z0-9_]{3,24}$/
+const MAX_JSON_BODY_CHARS = 10_000
+const MAX_MESSAGE_LENGTH = 500
+const MAX_PASSWORD_LENGTH = 200
+const MAX_RANK = 999
+
+class RequestValidationError extends Error {
+  constructor(message, status = 400) {
+    super(message)
+    this.name = 'RequestValidationError'
+    this.status = status
+  }
+}
+
+function json(body, status = 200, extraHeaders = {}) {
+  return NextResponse.json(body, {
+    status,
+    headers: {
+      ...JSON_HEADERS,
+      ...extraHeaders,
+    },
+  })
+}
+
+function getClientAddress(request) {
+  const forwardedFor = request.headers.get('x-forwarded-for')
+
+  if (forwardedFor) {
+    return forwardedFor.split(',')[0].trim()
+  }
+
+  return request.headers.get('x-real-ip') || 'unknown'
+}
+
+function ensureJsonRequest(request) {
+  const contentType = request.headers.get('content-type') || ''
+
+  if (!contentType.toLowerCase().includes('application/json')) {
+    throw new RequestValidationError('JSON requests are required.', 415)
+  }
+}
+
+async function parseJsonBody(request) {
+  ensureJsonRequest(request)
+
+  const rawBody = await request.text()
+
+  if (!rawBody || !rawBody.trim()) {
+    throw new RequestValidationError('Request body is required.')
+  }
+
+  if (rawBody.length > MAX_JSON_BODY_CHARS) {
+    throw new RequestValidationError('Request body is too large.', 413)
+  }
+
+  try {
+    return JSON.parse(rawBody)
+  } catch {
+    throw new RequestValidationError('Request body must be valid JSON.')
+  }
+}
+
+function ensurePlainObject(value, message = 'Invalid request payload.') {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    throw new RequestValidationError(message)
+  }
+
+  return value
+}
+
+function normalizeOptionalText(value, fieldName, maxLength = MAX_MESSAGE_LENGTH) {
+  if (value == null) {
+    return null
+  }
+
+  if (typeof value !== 'string') {
+    throw new RequestValidationError(`${fieldName} must be text.`)
+  }
+
+  const normalized = value.trim()
+
+  if (!normalized) {
+    return null
+  }
+
+  if (normalized.length > maxLength) {
+    throw new RequestValidationError(`${fieldName} is too long.`)
+  }
+
+  return normalized
+}
+
+function normalizeRequiredText(value, fieldName, maxLength) {
+  const normalized = normalizeOptionalText(value, fieldName, maxLength)
+
+  if (!normalized) {
+    throw new RequestValidationError(`${fieldName} is required.`)
+  }
+
+  return normalized
+}
+
+function normalizeUuid(value, fieldName) {
+  if (typeof value !== 'string' || !UUID_PATTERN.test(value.trim())) {
+    throw new RequestValidationError(`${fieldName} must be a valid id.`)
+  }
+
+  return value.trim().toLowerCase()
+}
+
+function normalizeOptionalUuid(value, fieldName) {
+  if (value == null) {
+    return null
+  }
+
+  return normalizeUuid(value, fieldName)
+}
+
+function normalizeUsername(value, fieldName) {
+  if (typeof value !== 'string') {
+    throw new RequestValidationError(`${fieldName} must be a username.`)
+  }
+
+  const normalized = value.trim().toLowerCase()
+
+  if (!USERNAME_PATTERN.test(normalized)) {
+    throw new RequestValidationError(`${fieldName} must be an exact username.`)
+  }
+
+  return normalized
+}
+
+function normalizeOptionalUsername(value, fieldName) {
+  if (value == null) {
+    return null
+  }
+
+  return normalizeUsername(value, fieldName)
+}
+
+function normalizeLadderCode(value, fieldName) {
+  if (typeof value !== 'string' || !LADDER_CODES.has(value)) {
+    throw new RequestValidationError(`${fieldName} is invalid.`)
+  }
+
+  return value
+}
+
+function normalizeOptionalLadderCode(value, fieldName) {
+  if (value == null) {
+    return null
+  }
+
+  return normalizeLadderCode(value, fieldName)
+}
+
+function normalizePositiveInteger(value, fieldName) {
+  if (!Number.isInteger(value) || value < 1 || value > MAX_RANK) {
+    throw new RequestValidationError(`${fieldName} must be a positive whole number.`)
+  }
+
+  return value
+}
+
+function normalizeOptionalPositiveInteger(value, fieldName) {
+  if (value == null) {
+    return null
+  }
+
+  return normalizePositiveInteger(value, fieldName)
+}
+
+function normalizeBoolean(value, fieldName) {
+  if (typeof value !== 'boolean') {
+    throw new RequestValidationError(`${fieldName} must be true or false.`)
+  }
+
+  return value
+}
+
+const RPC_CONFIG = {
+  claim_admin_role: {
+    rateLimit: { limit: 5, windowMs: 15 * 60 * 1000, scope: 'user_ip' },
+    sanitizePayload(payload) {
+      return {
+        p_password: normalizeRequiredText(payload.p_password, 'Officer password', MAX_PASSWORD_LENGTH),
+      }
+    },
+  },
+  submit_ladder_request: {
+    rateLimit: { limit: 12, windowMs: 10 * 60 * 1000, scope: 'user' },
+    sanitizePayload(payload) {
+      const requestType = typeof payload.p_request_type === 'string' ? payload.p_request_type : null
+
+      if (!REQUEST_TYPES.has(requestType)) {
+        throw new RequestValidationError('Request type is invalid.')
+      }
+
+      return {
+        p_ladder_code: normalizeLadderCode(payload.p_ladder_code, 'Ladder'),
+        p_request_type: requestType,
+        p_target_rank: normalizeOptionalPositiveInteger(payload.p_target_rank, 'Target rank'),
+        p_message: normalizeOptionalText(payload.p_message, 'Message'),
+        p_partner_username: normalizeOptionalUsername(payload.p_partner_username, 'Partner username'),
+        p_drop_ladder_code: normalizeOptionalLadderCode(payload.p_drop_ladder_code, 'Drop ladder'),
+      }
+    },
+  },
+  admin_add_user_to_ladder: {
+    adminOnly: true,
+    rateLimit: { limit: 25, windowMs: 10 * 60 * 1000, scope: 'user' },
+    sanitizePayload(payload) {
+      const userId = normalizeUuid(payload.p_user_id, 'Primary player')
+      const partnerUserId = normalizeOptionalUuid(payload.p_partner_user_id, 'Partner')
+
+      if (partnerUserId && partnerUserId === userId) {
+        throw new RequestValidationError('A doubles team needs two different users.')
+      }
+
+      return {
+        p_ladder_code: normalizeLadderCode(payload.p_ladder_code, 'Ladder'),
+        p_user_id: userId,
+        p_partner_user_id: partnerUserId,
+        p_rank: normalizeOptionalPositiveInteger(payload.p_rank, 'Starting rank'),
+      }
+    },
+  },
+  admin_move_ladder_entry: {
+    adminOnly: true,
+    rateLimit: { limit: 40, windowMs: 10 * 60 * 1000, scope: 'user' },
+    sanitizePayload(payload) {
+      return {
+        p_entry_id: normalizeUuid(payload.p_entry_id, 'Entry'),
+        p_new_rank: normalizePositiveInteger(payload.p_new_rank, 'New rank'),
+      }
+    },
+  },
+  admin_remove_ladder_entry: {
+    adminOnly: true,
+    rateLimit: { limit: 25, windowMs: 10 * 60 * 1000, scope: 'user' },
+    sanitizePayload(payload) {
+      return {
+        p_entry_id: normalizeUuid(payload.p_entry_id, 'Entry'),
+      }
+    },
+  },
+  admin_resolve_request: {
+    adminOnly: true,
+    rateLimit: { limit: 30, windowMs: 10 * 60 * 1000, scope: 'user' },
+    sanitizePayload(payload) {
+      if (typeof payload.p_decision !== 'string' || !REQUEST_DECISIONS.has(payload.p_decision)) {
+        throw new RequestValidationError('Decision is invalid.')
+      }
+
+      return {
+        p_request_id: normalizeUuid(payload.p_request_id, 'Request'),
+        p_decision: payload.p_decision,
+        p_rank: normalizeOptionalPositiveInteger(payload.p_rank, 'Rank override'),
+      }
+    },
+  },
+  member_drop_own_ladder_entry: {
+    rateLimit: { limit: 15, windowMs: 10 * 60 * 1000, scope: 'user' },
+    sanitizePayload(payload) {
+      return {
+        p_entry_id: normalizeUuid(payload.p_entry_id, 'Entry'),
+      }
+    },
+  },
+  respond_to_partner_ladder_invite: {
+    rateLimit: { limit: 20, windowMs: 10 * 60 * 1000, scope: 'user' },
+    sanitizePayload(payload) {
+      return {
+        p_request_id: normalizeUuid(payload.p_request_id, 'Request'),
+        p_accept: normalizeBoolean(payload.p_accept, 'Accept'),
+        p_drop_ladder_code: normalizeOptionalLadderCode(payload.p_drop_ladder_code, 'Drop ladder'),
+      }
+    },
+  },
+  search_users_by_username: {
+    rateLimit: { limit: 20, windowMs: 60 * 1000, scope: 'user_ip' },
+    sanitizePayload(payload) {
+      return {
+        p_query: normalizeUsername(payload.p_query, 'Username'),
+      }
+    },
+  },
+  send_friend_request: {
+    rateLimit: { limit: 10, windowMs: 10 * 60 * 1000, scope: 'user_ip' },
+    sanitizePayload(payload) {
+      return {
+        p_username: normalizeUsername(payload.p_username, 'Username'),
+      }
+    },
+  },
+  respond_to_friend_request: {
+    rateLimit: { limit: 20, windowMs: 10 * 60 * 1000, scope: 'user' },
+    sanitizePayload(payload) {
+      return {
+        p_request_id: normalizeUuid(payload.p_request_id, 'Request'),
+        p_accept: normalizeBoolean(payload.p_accept, 'Accept'),
+      }
+    },
+  },
+  mark_notification_read: {
+    rateLimit: { limit: 60, windowMs: 60 * 1000, scope: 'user' },
+    sanitizePayload(payload) {
+      return {
+        p_notification_id: normalizeUuid(payload.p_notification_id, 'Notification'),
+      }
+    },
+  },
+}
+
+function applyRateLimit(request, profile, functionName, config) {
+  if (!config.rateLimit) {
+    return null
+  }
+
+  const clientAddress = getClientAddress(request)
+  const scopeParts = [functionName]
+
+  if (config.rateLimit.scope.includes('user')) {
+    scopeParts.push(profile.id)
+  }
+
+  if (config.rateLimit.scope.includes('ip')) {
+    scopeParts.push(clientAddress)
+  }
+
+  const result = consumeRateLimit({
+    key: scopeParts.join(':'),
+    limit: config.rateLimit.limit,
+    windowMs: config.rateLimit.windowMs,
+  })
+
+  if (!result.allowed) {
+    return json(
+      { error: 'Too many requests. Please wait and try again.' },
+      429,
+      { 'Retry-After': String(result.retryAfterSeconds) },
+    )
+  }
+
+  return null
+}
 
 export async function POST(request) {
   try {
     const { profile, supabaseUser } = await requireProfile(request)
-    const body = await request.json()
+    const body = ensurePlainObject(await parseJsonBody(request), 'Invalid request body.')
     const functionName = body?.functionName
-    const payload = body?.payload || {}
+    const payload = ensurePlainObject(body?.payload || {}, 'Invalid request payload.')
+    const config = RPC_CONFIG[functionName]
 
-    if (!ALLOWED_RPCS.has(functionName)) {
-      return NextResponse.json({ error: 'RPC not allowed.' }, { status: 400 })
+    if (!config) {
+      return json({ error: 'RPC not allowed.' }, 400)
     }
 
-    if (ADMIN_ONLY_RPCS.has(functionName) && profile.role !== 'officer') {
-      return NextResponse.json({ error: 'Officer access is required.' }, { status: 403 })
+    if (config.adminOnly && profile.role !== 'officer') {
+      return json({ error: 'Officer access is required.' }, 403)
     }
 
-    const { data, error } = await supabaseUser.rpc(functionName, payload)
+    const rateLimitResponse = applyRateLimit(request, profile, functionName, config)
+
+    if (rateLimitResponse) {
+      return rateLimitResponse
+    }
+
+    const sanitizedPayload = config.sanitizePayload(payload)
+    const { data, error } = await supabaseUser.rpc(functionName, sanitizedPayload)
 
     if (error) {
-      return NextResponse.json({ error: error.message }, { status: 400 })
+      return json({ error: error.message }, 400)
     }
 
-    return NextResponse.json({ data: data ?? null })
+    return json({ data: data ?? null })
   } catch (error) {
-    return NextResponse.json(
-      { error: error.message || 'Unable to complete the request.' },
-      { status: 401 },
-    )
+    const status = error instanceof RequestValidationError ? error.status : 401
+
+    return json({ error: error.message || 'Unable to complete the request.' }, status)
   }
 }

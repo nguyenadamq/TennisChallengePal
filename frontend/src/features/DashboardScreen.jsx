@@ -47,6 +47,26 @@ function formatGenderShort(value) {
   return value === 'female' ? 'F' : 'M'
 }
 
+function isValidDoublesPartnerForLadder(playerGender, partnerGender, ladderCode) {
+  if (!partnerGender) {
+    return false
+  }
+
+  if (ladderCode === 'mixed_doubles') {
+    return playerGender !== partnerGender
+  }
+
+  if (ladderCode === 'mens_doubles') {
+    return playerGender === 'male' && partnerGender === 'male'
+  }
+
+  if (ladderCode === 'womens_doubles') {
+    return playerGender === 'female' && partnerGender === 'female'
+  }
+
+  return true
+}
+
 function HomeTab({
   profile,
   myEntries,
@@ -230,6 +250,70 @@ export default function Dashboard() {
     }
   }, [loadDashboard])
 
+  const getEntriesForLadder = useCallback((ladderId) => {
+    return entries
+      .filter((entry) => entry.ladder_id === ladderId)
+      .sort((left, right) => left.rank_position - right.rank_position)
+  }, [entries])
+
+  const myEntries = getEntriesForUser(profile?.id)
+  const challengeableLadders = ladders.filter((ladder) =>
+    canChallengeLadder(ladder.id, ladder.code),
+  )
+  const selectedChallengeLadder =
+    challengeableLadders.find((ladder) => ladder.code === requestForm.ladderCode) ||
+    challengeableLadders[0] ||
+    null
+  const selectedChallengeLadderRank = selectedChallengeLadder
+    ? getCurrentRank(selectedChallengeLadder.id)
+    : null
+
+  useEffect(() => {
+    if (!profile || requestForm.requestType !== 'challenge' || !challengeableLadders.length) {
+      return
+    }
+
+    const nextChallengeOptions =
+      selectedChallengeLadder && selectedChallengeLadderRank
+        ? getEntriesForLadder(selectedChallengeLadder.id).filter((entry) => {
+            const minimumAllowedRank =
+              selectedChallengeLadderRank > 7
+                ? 1
+                : Math.max(1, selectedChallengeLadderRank - 3)
+            const maximumAllowedRank =
+              selectedChallengeLadderRank > 7 ? 7 : selectedChallengeLadderRank - 1
+
+            return (
+              entry.rank_position >= minimumAllowedRank &&
+              entry.rank_position <= maximumAllowedRank
+            )
+          })
+        : []
+    const hasCurrentTarget = nextChallengeOptions.some(
+      (entry) => String(entry.rank_position) === requestForm.targetRank,
+    )
+
+    if (
+      selectedChallengeLadder.code !== requestForm.ladderCode ||
+      (!hasCurrentTarget && requestForm.targetRank)
+    ) {
+      setRequestForm((current) => ({
+        ...current,
+        ladderCode: selectedChallengeLadder.code,
+        targetRank: hasCurrentTarget ? current.targetRank : '',
+      }))
+    }
+  }, [
+    challengeableLadders,
+    profile,
+    requestForm.ladderCode,
+    requestForm.requestType,
+    requestForm.targetRank,
+    selectedChallengeLadder,
+    selectedChallengeLadderRank,
+    getEntriesForLadder,
+  ])
+
   async function runAction(actionKey, action, successText) {
     setBusyAction(actionKey)
     setErrorMessage('')
@@ -249,12 +333,6 @@ export default function Dashboard() {
   async function handleSignOut() {
     await signOut()
     router.replace('/login')
-  }
-
-  function getEntriesForLadder(ladderId) {
-    return entries
-      .filter((entry) => entry.ladder_id === ladderId)
-      .sort((left, right) => left.rank_position - right.rank_position)
   }
 
   function getEntriesForUser(userId) {
@@ -300,9 +378,29 @@ export default function Dashboard() {
     return Boolean(rank && rank > 1)
   }
 
+  function getChallengeOptions(ladderId, ladderCode) {
+    if (!canChallengeLadder(ladderId, ladderCode)) {
+      return []
+    }
+
+    const currentRank = getCurrentRank(ladderId)
+    const minimumAllowedRank = currentRank > 7 ? 1 : Math.max(1, currentRank - 3)
+    const maximumAllowedRank = currentRank > 7 ? 7 : currentRank - 1
+
+    return getEntriesForLadder(ladderId).filter(
+      (entry) =>
+        entry.rank_position >= minimumAllowedRank &&
+        entry.rank_position <= maximumAllowedRank,
+    )
+  }
+
   function getEligibleFriendsForLadder(ladderCode) {
     return friends.filter((friend) => {
       if (!isEligibleForLadder(friend.friend_gender, ladderCode)) {
+        return false
+      }
+
+      if (!isValidDoublesPartnerForLadder(profile?.gender, friend.friend_gender, ladderCode)) {
         return false
       }
 
@@ -320,6 +418,30 @@ export default function Dashboard() {
     await runAction(
       'request',
       async () => {
+        if (requestForm.requestType === 'join' && DOUBLES_LADDERS.includes(requestForm.ladderCode)) {
+          const selectedFriend = friends.find(
+            (friend) => friend.friend_username === requestForm.partnerUsername,
+          )
+
+          if (!selectedFriend) {
+            throw new Error('Choose an eligible friend for doubles requests.')
+          }
+
+          if (
+            !isValidDoublesPartnerForLadder(
+              profile.gender,
+              selectedFriend.friend_gender,
+              requestForm.ladderCode,
+            )
+          ) {
+            if (requestForm.ladderCode === 'mixed_doubles') {
+              throw new Error('Mixed doubles requires one male player and one female player.')
+            }
+
+            throw new Error('That friend is not eligible for the selected doubles ladder.')
+          }
+        }
+
         await submitLadderRequest({
           ladderCode: requestForm.ladderCode,
           requestType: requestForm.requestType,
@@ -374,6 +496,7 @@ export default function Dashboard() {
     event.preventDefault()
     setBusyAction('friend-search')
     setErrorMessage('')
+    setSearchResults([])
 
     try {
       const results = await searchUsersByUsername(friendSearch)
@@ -434,7 +557,6 @@ export default function Dashboard() {
     return <div className="app-loading">Loading your player profile...</div>
   }
 
-  const myEntries = getEntriesForUser(profile.id)
   const incomingFriendRequests = friendRequests.filter(
     (request) => request.receiver_id === profile.id && request.status === 'pending',
   )
@@ -447,6 +569,9 @@ export default function Dashboard() {
   const selectedLadder = ladders.find((ladder) => ladder.code === requestForm.ladderCode)
   const joinAllowed = canJoinLadder(requestForm.ladderCode)
   const challengeAllowed = canChallengeLadder(selectedLadder?.id, requestForm.ladderCode)
+  const challengeOptions = selectedLadder
+    ? getChallengeOptions(selectedLadder.id, selectedLadder.code)
+    : []
   const needsDropChoice = requestForm.requestType === 'join' && myEntries.length >= 2 && joinAllowed
   const eligibleFriendOptions = getEligibleFriendsForLadder(requestForm.ladderCode)
   const unreadCount = unreadNotifications.length
@@ -701,11 +826,14 @@ export default function Dashboard() {
                         }))
                       }
                     >
-                      {ladders.map((ladder) => (
+                      {(requestForm.requestType === 'challenge' ? challengeableLadders : ladders).map((ladder) => (
                         <option
                           key={ladder.id}
                           value={ladder.code}
-                          disabled={!isEligibleForLadder(profile.gender, ladder.code)}
+                          disabled={
+                            requestForm.requestType === 'join' &&
+                            !isEligibleForLadder(profile.gender, ladder.code)
+                          }
                         >
                           {ladder.name}
                         </option>
@@ -718,13 +846,21 @@ export default function Dashboard() {
                     <select
                       value={requestForm.requestType}
                       onChange={(event) =>
-                        setRequestForm((current) => ({
-                          ...current,
-                          requestType: event.target.value,
-                          targetRank: '',
-                          partnerUsername: '',
-                          dropLadderCode: '',
-                        }))
+                        setRequestForm((current) => {
+                          const nextRequestType = event.target.value
+
+                          return {
+                            ...current,
+                            requestType: nextRequestType,
+                            ladderCode:
+                              nextRequestType === 'challenge' && challengeableLadders.length
+                                ? challengeableLadders[0].code
+                                : current.ladderCode,
+                            targetRank: '',
+                            partnerUsername: '',
+                            dropLadderCode: '',
+                          }
+                        })
                       }
                     >
                       <option value="join">Join ladder</option>
@@ -734,11 +870,8 @@ export default function Dashboard() {
 
                   {requestForm.requestType === 'challenge' ? (
                     <label>
-                      <span>Target rank</span>
-                      <input
-                        type="number"
-                        min="1"
-                        max="7"
+                      <span>Challenge player or team</span>
+                      <select
                         value={requestForm.targetRank}
                         onChange={(event) =>
                           setRequestForm((current) => ({
@@ -747,7 +880,14 @@ export default function Dashboard() {
                           }))
                         }
                         required
-                      />
+                      >
+                        <option value="">Choose who to challenge</option>
+                        {challengeOptions.map((entry) => (
+                          <option key={entry.entry_id} value={entry.rank_position}>
+                            #{entry.rank_position} {entry.team_label}
+                          </option>
+                        ))}
+                      </select>
                     </label>
                   ) : null}
 
@@ -818,13 +958,18 @@ export default function Dashboard() {
                   {requestForm.requestType === 'challenge' && !challengeAllowed ? (
                     <p className="form-error">You need to already be ranked on this ladder before challenging.</p>
                   ) : null}
+                  {requestForm.requestType === 'challenge' && challengeAllowed && !challengeOptions.length ? (
+                    <p className="form-error">There is nobody eligible to challenge from this ladder right now.</p>
+                  ) : null}
 
                   <button
                     className="primary-button"
                     type="submit"
                     disabled={
                       busyAction === 'request' ||
-                      (requestForm.requestType === 'join' ? !joinAllowed : !challengeAllowed)
+                      (requestForm.requestType === 'join'
+                        ? !joinAllowed
+                        : !challengeAllowed || !requestForm.targetRank)
                     }
                   >
                     {busyAction === 'request' ? 'Sending...' : 'Send request'}
@@ -868,6 +1013,7 @@ export default function Dashboard() {
                     value={friendSearch}
                     onChange={(event) => setFriendSearch(event.target.value)}
                     placeholder="Search by username"
+                    required
                   />
                 </label>
                 <button className="primary-button" type="submit" disabled={busyAction === 'friend-search'}>

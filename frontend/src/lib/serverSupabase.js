@@ -60,7 +60,7 @@ export async function requireProfile(request) {
   const supabaseUser = createServerSupabaseUserClient(token)
   const { data: profile, error } = await supabaseUser
     .from('profiles')
-    .select('id, email, display_name, username, gender, role, created_at')
+    .select('id, display_name, username, gender, role')
     .eq('id', user.id)
     .maybeSingle()
 

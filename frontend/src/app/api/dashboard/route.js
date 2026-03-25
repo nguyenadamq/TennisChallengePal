@@ -1,6 +1,10 @@
 import { NextResponse } from 'next/server'
 import { requireProfile } from '../../../lib/serverSupabase'
 
+const JSON_HEADERS = {
+  'Cache-Control': 'no-store',
+}
+
 export async function GET(request) {
   try {
     const { user, profile, supabaseUser } = await requireProfile(request)
@@ -69,20 +73,23 @@ export async function GET(request) {
       }
     }
 
-    return NextResponse.json({
-      profile,
-      ladders: laddersResult.data ?? [],
-      entries: entriesResult.data ?? [],
-      requests: requestsResult.data ?? [],
-      profiles: profilesResult.data ?? [],
-      friends: friendsResult.data ?? [],
-      friendRequests: friendRequestsResult.data ?? [],
-      notifications: notificationsResult.data ?? [],
-    })
+    return NextResponse.json(
+      {
+        profile,
+        ladders: laddersResult.data ?? [],
+        entries: entriesResult.data ?? [],
+        requests: requestsResult.data ?? [],
+        profiles: profilesResult.data ?? [],
+        friends: friendsResult.data ?? [],
+        friendRequests: friendRequestsResult.data ?? [],
+        notifications: notificationsResult.data ?? [],
+      },
+      { headers: JSON_HEADERS },
+    )
   } catch (error) {
     return NextResponse.json(
       { error: error.message || 'Unable to load dashboard.' },
-      { status: 401 },
+      { status: 401, headers: JSON_HEADERS },
     )
   }
 }

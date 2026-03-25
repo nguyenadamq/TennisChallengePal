@@ -1,13 +1,4 @@
-'use client'
-
-import nextDynamic from 'next/dynamic'
-
-export const dynamic = 'force-dynamic'
-
-const Login = nextDynamic(() => import('../../features/LoginScreen'), {
-  ssr: false,
-  loading: () => <div className="app-loading">Loading Challenge Court...</div>,
-})
+import Login from '../../features/LoginScreen'
 
 export default function LoginPage() {
   return <Login />

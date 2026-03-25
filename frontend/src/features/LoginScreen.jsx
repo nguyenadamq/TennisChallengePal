@@ -94,6 +94,7 @@ export default function Login() {
               onChange={(event) => updateField('email', event.target.value)}
               placeholder="captain@club.com"
               required
+              autoComplete="email"
             />
           </label>
 
@@ -105,6 +106,7 @@ export default function Login() {
               onChange={(event) => updateField('password', event.target.value)}
               placeholder="••••••••"
               required
+              autoComplete="current-password"
             />
           </label>
 

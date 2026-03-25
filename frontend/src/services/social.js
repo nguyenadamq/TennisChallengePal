@@ -1,8 +1,10 @@
 import { apiRequest } from '../lib/apiClient'
 
 export async function searchUsersByUsername(query) {
-  if (!query.trim()) {
-    return []
+  const normalizedQuery = query.trim().toLowerCase()
+
+  if (!normalizedQuery) {
+    throw new Error('Enter an exact username to search.')
   }
 
   const result = await apiRequest('/api/rpc', {
@@ -10,7 +12,7 @@ export async function searchUsersByUsername(query) {
     body: JSON.stringify({
       functionName: 'search_users_by_username',
       payload: {
-        p_query: query.trim().toLowerCase(),
+        p_query: normalizedQuery,
       },
     }),
   })

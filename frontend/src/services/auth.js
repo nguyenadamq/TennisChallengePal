@@ -1,6 +1,20 @@
 import { supabase } from '../lib/supabaseClient'
 import { apiRequest } from '../lib/apiClient'
 
+function assertStrongPassword(password) {
+  if (typeof password !== 'string' || password.length < 12) {
+    throw new Error('Use a password with at least 12 characters.')
+  }
+
+  if (
+    !/[a-z]/.test(password) ||
+    !/[A-Z]/.test(password) ||
+    !/\d/.test(password)
+  ) {
+    throw new Error('Use a stronger password with uppercase, lowercase, and a number.')
+  }
+}
+
 function delay(ms) {
   return new Promise((resolve) => {
     window.setTimeout(resolve, ms)
@@ -21,8 +35,10 @@ async function fetchProfileOnce() {
 }
 
 export async function signUp({ email, password, displayName, username, gender }) {
+  assertStrongPassword(password)
+
   const { data, error } = await supabase.auth.signUp({
-    email,
+    email: email.trim(),
     password,
     options: {
       data: {
@@ -49,7 +65,7 @@ export async function signUp({ email, password, displayName, username, gender })
 
 export async function signIn(email, password) {
   const { data, error } = await supabase.auth.signInWithPassword({
-    email,
+    email: email.trim(),
     password,
   })
 
