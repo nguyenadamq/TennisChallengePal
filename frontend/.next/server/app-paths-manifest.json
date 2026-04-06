@@ -1,7 +1,7 @@
 {
   "/api/profile/route": "app/api/profile/route.js",
   "/api/dashboard/route": "app/api/dashboard/route.js",
-  "/api/rpc/route": "app/api/rpc/route.js",
   "/page": "app/page.js",
-  "/dashboard/page": "app/dashboard/page.js"
+  "/dashboard/page": "app/dashboard/page.js",
+  "/login/page": "app/login/page.js"
 }

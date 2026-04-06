@@ -1,4 +1,4 @@
-// File: C:\Users\User\Documents\GitHub\TennisChallengePal\frontend\src\app\layout.jsx
+// File: F:\Coding Practice\GitHub\CS494\TennisChallengePal\frontend\src\app\layout.jsx
 import * as entry from '../../../src/app/layout.js'
 import type { ResolvingMetadata, ResolvingViewport } from 'next/dist/lib/metadata/types/metadata-interface.js'
 

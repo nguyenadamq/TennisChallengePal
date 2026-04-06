@@ -1,4 +1,4 @@
-// File: C:\Users\User\Documents\GitHub\TennisChallengePal\frontend\src\app\api\profile\route.js
+// File: F:\Coding Practice\GitHub\CS494\TennisChallengePal\frontend\src\app\api\profile\route.js
 import * as entry from '../../../../../src/app/api/profile/route.js'
 import type { NextRequest } from 'next/server.js'
 
