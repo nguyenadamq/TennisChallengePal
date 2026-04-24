@@ -10,9 +10,11 @@ export async function GET(request) {
     const { profile } = await requireProfile(request)
     return NextResponse.json({ profile }, { headers: JSON_HEADERS })
   } catch (error) {
+    console.error('PROFILE API ERROR:', error)
+
     return NextResponse.json(
       { error: error.message || 'Unable to load profile.' },
-      { status: 401, headers: JSON_HEADERS },
+      { status: 500, headers: JSON_HEADERS },
     )
   }
 }

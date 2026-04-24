@@ -1,7 +1,10 @@
 {
   "/api/profile/route": "app/api/profile/route.js",
+  "/api/rpc/route": "app/api/rpc/route.js",
   "/api/dashboard/route": "app/api/dashboard/route.js",
-  "/page": "app/page.js",
   "/dashboard/page": "app/dashboard/page.js",
-  "/login/page": "app/login/page.js"
+  "/signup/page": "app/signup/page.js",
+  "/login/page": "app/login/page.js",
+  "/page": "app/page.js",
+  "/_not-found/page": "app/_not-found/page.js"
 }

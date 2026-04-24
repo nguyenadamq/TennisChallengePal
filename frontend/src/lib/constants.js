@@ -12,6 +12,16 @@ export const DOUBLES_LADDERS = [
   'womens_doubles',
 ]
 
+export const DAYS_OF_WEEK = [
+  'Monday',
+  'Tuesday',
+  'Wednesday',
+  'Thursday',
+  'Friday',
+  'Saturday',
+  'Sunday',
+]
+
 export const LADDER_RULE_COPY = {
   male: {
     eligible: ['mens_singles', 'mens_doubles', 'mixed_doubles'],

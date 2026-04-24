@@ -1,19 +1,5 @@
 import { apiRequest } from '../lib/apiClient'
 
-export async function fetchDashboardData(_userId, _isAdmin) {
-  const result = await apiRequest('/api/dashboard')
-
-  return {
-    ladders: result.ladders ?? [],
-    entries: result.entries ?? [],
-    requests: result.requests ?? [],
-    profiles: result.profiles ?? [],
-    friends: result.friends ?? [],
-    friendRequests: result.friendRequests ?? [],
-    notifications: result.notifications ?? [],
-  }
-}
-
 export async function submitLadderRequest(payload) {
   return apiRequest('/api/rpc', {
     method: 'POST',

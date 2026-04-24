@@ -1,0 +1,10 @@
+{
+  "/api/profile/route": "/api/profile",
+  "/api/rpc/route": "/api/rpc",
+  "/api/dashboard/route": "/api/dashboard",
+  "/dashboard/page": "/dashboard",
+  "/signup/page": "/signup",
+  "/login/page": "/login",
+  "/page": "/",
+  "/_not-found/page": "/_not-found"
+}

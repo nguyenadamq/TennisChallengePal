@@ -60,7 +60,7 @@ export async function requireProfile(request) {
   const supabaseUser = createServerSupabaseUserClient(token)
   const { data: profile, error } = await supabaseUser
     .from('profiles')
-    .select('id, display_name, username, gender, role')
+    .select('id, display_name, username, gender, role, club_id')
     .eq('id', user.id)
     .maybeSingle()
 
@@ -72,5 +72,28 @@ export async function requireProfile(request) {
     throw new Error('Profile not found for this account.')
   }
 
-  return { user, profile, supabaseUser }
+  let clubName = null
+
+  if (profile.club_id) {
+    const { data: club, error: clubError } = await supabaseUser
+      .from('clubs')
+      .select('name')
+      .eq('id', profile.club_id)
+      .maybeSingle()
+
+    if (clubError) {
+      throw clubError
+    }
+
+    clubName = club?.name ?? null
+  }
+
+  return {
+    user,
+    profile: {
+      ...profile,
+      club_name: clubName,
+    },
+    supabaseUser,
+  }
 }

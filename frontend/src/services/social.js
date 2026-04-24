@@ -56,3 +56,16 @@ export async function markNotificationRead(notificationId) {
     }),
   })
 }
+
+export async function setHitPartnerPreference(friendId, enabled) {
+  return apiRequest('/api/rpc', {
+    method: 'POST',
+    body: JSON.stringify({
+      functionName: 'set_hit_partner_preference',
+      payload: {
+        p_friend_id: friendId,
+        p_enabled: enabled,
+      },
+    }),
+  })
+}

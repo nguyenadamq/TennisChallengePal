@@ -16,13 +16,26 @@ const LADDER_CODES = new Set([
 
 const REQUEST_TYPES = new Set(['join', 'challenge'])
 const REQUEST_DECISIONS = new Set(['approved', 'rejected'])
+const COURT_VISIBILITIES = new Set(['open', 'invite_only'])
+const DAYS_OF_WEEK = new Set([
+  'Monday',
+  'Tuesday',
+  'Wednesday',
+  'Thursday',
+  'Friday',
+  'Saturday',
+  'Sunday',
+])
 const UUID_PATTERN =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i
 const USERNAME_PATTERN = /^[a-z0-9_]{3,24}$/
+const CLUB_NAME_PATTERN = /^[a-z0-9][a-z0-9 '\-_]{1,38}[a-z0-9]$/i
+const TIME_PATTERN = /^([01]\d|2[0-3]):([0-5]\d)$/
 const MAX_JSON_BODY_CHARS = 10_000
 const MAX_MESSAGE_LENGTH = 500
 const MAX_PASSWORD_LENGTH = 200
 const MAX_RANK = 999
+const MAX_INVITEES = 24
 
 class RequestValidationError extends Error {
   constructor(message, status = 400) {
@@ -150,6 +163,22 @@ function normalizeUsername(value, fieldName) {
   return normalized
 }
 
+function normalizeClubName(value, fieldName) {
+  if (typeof value !== 'string') {
+    throw new RequestValidationError(`${fieldName} must be text.`)
+  }
+
+  const normalized = value.trim()
+
+  if (!CLUB_NAME_PATTERN.test(normalized)) {
+    throw new RequestValidationError(
+      `${fieldName} must be 3-40 characters and use letters, numbers, spaces, apostrophes, hyphens, or underscores.`,
+    )
+  }
+
+  return normalized
+}
+
 function normalizeOptionalUsername(value, fieldName) {
   if (value == null) {
     return null
@@ -198,7 +227,68 @@ function normalizeBoolean(value, fieldName) {
   return value
 }
 
+function normalizeVisibility(value, fieldName) {
+  if (typeof value !== 'string' || !COURT_VISIBILITIES.has(value)) {
+    throw new RequestValidationError(`${fieldName} is invalid.`)
+  }
+
+  return value
+}
+
+function normalizeUuidArray(value, fieldName) {
+  if (!Array.isArray(value)) {
+    throw new RequestValidationError(`${fieldName} must be a list.`)
+  }
+
+  if (value.length > MAX_INVITEES) {
+    throw new RequestValidationError(`${fieldName} has too many entries.`)
+  }
+
+  const normalized = value.map((entry) => normalizeUuid(entry, fieldName))
+  const unique = Array.from(new Set(normalized))
+
+  if (unique.length !== normalized.length) {
+    throw new RequestValidationError(`${fieldName} cannot contain duplicates.`)
+  }
+
+  return unique
+}
+
+function normalizeDayOfWeek(value, fieldName) {
+  if (typeof value !== 'string' || !DAYS_OF_WEEK.has(value)) {
+    throw new RequestValidationError(`${fieldName} is invalid.`)
+  }
+
+  return value
+}
+
+function normalizeTime(value, fieldName) {
+  if (typeof value !== 'string' || !TIME_PATTERN.test(value)) {
+    throw new RequestValidationError(`${fieldName} must use HH:MM 24-hour time.`)
+  }
+
+  return value
+}
+
 const RPC_CONFIG = {
+  create_club: {
+    rateLimit: { limit: 5, windowMs: 15 * 60 * 1000, scope: 'user' },
+    sanitizePayload(payload) {
+      return {
+        p_club_name: normalizeClubName(payload.p_club_name, 'Club name'),
+        p_password: normalizeRequiredText(payload.p_password, 'Club password', MAX_PASSWORD_LENGTH),
+      }
+    },
+  },
+  join_club: {
+    rateLimit: { limit: 10, windowMs: 15 * 60 * 1000, scope: 'user_ip' },
+    sanitizePayload(payload) {
+      return {
+        p_club_name: normalizeClubName(payload.p_club_name, 'Club name'),
+        p_password: normalizeRequiredText(payload.p_password, 'Club password', MAX_PASSWORD_LENGTH),
+      }
+    },
+  },
   claim_admin_role: {
     rateLimit: { limit: 5, windowMs: 15 * 60 * 1000, scope: 'user_ip' },
     sanitizePayload(payload) {
@@ -327,6 +417,45 @@ const RPC_CONFIG = {
     sanitizePayload(payload) {
       return {
         p_notification_id: normalizeUuid(payload.p_notification_id, 'Notification'),
+      }
+    },
+  },
+  set_hit_partner_preference: {
+    rateLimit: { limit: 40, windowMs: 10 * 60 * 1000, scope: 'user' },
+    sanitizePayload(payload) {
+      return {
+        p_friend_id: normalizeUuid(payload.p_friend_id, 'Friend'),
+        p_enabled: normalizeBoolean(payload.p_enabled, 'Hit Partner'),
+      }
+    },
+  },
+  create_fill_court: {
+    rateLimit: { limit: 20, windowMs: 10 * 60 * 1000, scope: 'user' },
+    sanitizePayload(payload) {
+      const startTime = normalizeTime(payload.p_start_time, 'Start time')
+      const endTime = normalizeTime(payload.p_end_time, 'End time')
+
+      if (startTime >= endTime) {
+        throw new RequestValidationError('End time must be later than start time.')
+      }
+
+      return {
+        p_title: normalizeRequiredText(payload.p_title, 'Court title', 120),
+        p_details: normalizeOptionalText(payload.p_details, 'Court details', 500),
+        p_visibility: normalizeVisibility(payload.p_visibility, 'Court visibility'),
+        p_invitee_ids: normalizeUuidArray(payload.p_invitee_ids ?? [], 'Invitees'),
+        p_day_of_week: normalizeDayOfWeek(payload.p_day_of_week, 'Day of week'),
+        p_start_time: startTime,
+        p_end_time: endTime,
+        p_max_players: normalizePositiveInteger(payload.p_max_players, 'Maximum players'),
+      }
+    },
+  },
+  join_fill_court: {
+    rateLimit: { limit: 20, windowMs: 10 * 60 * 1000, scope: 'user' },
+    sanitizePayload(payload) {
+      return {
+        p_court_id: normalizeUuid(payload.p_court_id, 'Court'),
       }
     },
   },
