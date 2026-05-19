@@ -1,8 +1,8 @@
-// File: C:\Users\User\Documents\GitHub\TennisChallengePal\frontend\src\app\api\profile\route.js
-import * as entry from '../../../../../src/app/api/profile/route.js'
+// File: C:\Users\User\Documents\GitHub\TennisChallengePal\frontend\src\app\api\auth\login\route.js
+import * as entry from '../../../../../../src/app/api/auth/login/route.js'
 import type { NextRequest } from 'next/server.js'
 
-type TEntry = typeof import('../../../../../src/app/api/profile/route.js')
+type TEntry = typeof import('../../../../../../src/app/api/auth/login/route.js')
 
 type SegmentParams<T extends Object = any> = T extends Record<string, any>
   ? { [K in keyof T]: T[K] extends string ? string | string[] | undefined : never }

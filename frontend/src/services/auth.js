@@ -34,7 +34,7 @@ async function fetchProfileOnce() {
   }
 }
 
-export async function signUp({ email, password, displayName, username, gender }) {
+export async function signUp({ email, password, firstName, lastName, username, sex, ageGroup }) {
   assertStrongPassword(password)
 
   const { data, error } = await supabase.auth.signUp({
@@ -42,9 +42,11 @@ export async function signUp({ email, password, displayName, username, gender })
     password,
     options: {
       data: {
-        display_name: displayName.trim(),
+        first_name: firstName.trim(),
+        last_name: lastName.trim(),
         username: username.trim().toLowerCase(),
-        gender,
+        sex,
+        age_group: ageGroup,
       },
     },
   })
@@ -63,17 +65,34 @@ export async function signUp({ email, password, displayName, username, gender })
   }
 }
 
-export async function signIn(email, password) {
-  const { data, error } = await supabase.auth.signInWithPassword({
-    email: email.trim(),
-    password,
+export async function signIn(username, password) {
+  const response = await fetch('/api/auth/login', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({
+      username: username.trim().toLowerCase(),
+      password,
+    }),
+  })
+
+  const payload = await response.json()
+
+  if (!response.ok) {
+    throw new Error(payload?.error || 'Unable to log in.')
+  }
+
+  const { error } = await supabase.auth.setSession({
+    access_token: payload.session.access_token,
+    refresh_token: payload.session.refresh_token,
   })
 
   if (error) {
     throw error
   }
 
-  return data.session
+  return payload.session
 }
 
 export async function signOut() {
@@ -110,12 +129,6 @@ export async function waitForProfile(_userId, attempts = 8) {
   )
 }
 
-export async function claimAdminRole(password) {
-  await apiRequest('/api/rpc', {
-    method: 'POST',
-    body: JSON.stringify({
-      functionName: 'claim_admin_role',
-      payload: { p_password: password },
-    }),
-  })
+export async function claimAdminRole() {
+  throw new Error('Club officer roles are managed by each club president.')
 }

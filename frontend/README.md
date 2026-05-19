@@ -1,18 +1,24 @@
 # Tennis Challenge Pal Frontend
 
-This Next.js app connects to Supabase for:
+Next.js app router frontend for Tennis Challenge Pal.
 
-- Email/password signup and login
-- Role-aware dashboards for `admin` and `user` accounts
-- Live leaderboard reads through realtime subscriptions
-- Next API route-driven ladder management and request workflows
-- App router pages for login, signup, and dashboard
+## Environment
 
-Run it locally with:
+Create `frontend/.env`:
+
+```env
+NEXT_PUBLIC_SUPABASE_URL=https://your-project.supabase.co
+NEXT_PUBLIC_SUPABASE_ANON_KEY=your-anon-key
+SUPABASE_SERVICE_ROLE_KEY=your-service-role-key
+```
+
+The service role key is used only by server routes for username login and filtered dashboard reads.
+
+## Run
 
 ```bash
 npm install
 npm run dev
 ```
 
-Create `frontend/.env` from `frontend/.env.example` before starting the app.
+Local URL: [http://localhost:5173](http://localhost:5173)

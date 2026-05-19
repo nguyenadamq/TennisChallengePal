@@ -7,8 +7,8 @@ const sora = Sora({
 })
 
 export const metadata = {
-  title: 'Challenge Court',
-  description: 'Live tennis ladder management with friends, requests, and officer tools.',
+  title: 'Tennis Challenge Pal',
+  description: 'Club ladders, friends, notifications, and tennis court finder tools.',
 }
 
 export default function RootLayout({ children }) {

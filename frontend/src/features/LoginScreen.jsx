@@ -7,7 +7,7 @@ import { supabase } from '../lib/supabaseClient'
 import { signIn } from '../services/auth'
 
 const initialForm = {
-  email: '',
+  username: '',
   password: '',
 }
 
@@ -48,7 +48,7 @@ export default function Login() {
     setErrorMessage('')
 
     try {
-      await signIn(form.email, form.password)
+      await signIn(form.username, form.password)
       router.replace('/dashboard')
     } catch (error) {
       setErrorMessage(error.message)
@@ -64,11 +64,11 @@ export default function Login() {
   return (
     <main className="auth-shell">
       <section className="auth-hero">
-        <p className="eyebrow">Live Club Rankings</p>
-        <h1>Challenge Court</h1>
+        <p className="eyebrow">Welcome Back</p>
+        <h1>Tennis Challenge Pal</h1>
         <p className="auth-copy">
-          Run every ladder from one place. Officers manage rankings and requests,
-          and members track live standings across singles, doubles, and mixed.
+          Sign in with your username to reach clubs, friends, court posts, and every ladder
+          attached to your memberships.
         </p>
         <div className="hero-pills">
           <span>Mens Singles</span>
@@ -87,14 +87,17 @@ export default function Login() {
 
         <form className="form-stack" onSubmit={handleSubmit}>
           <label>
-            <span>Email</span>
+            <span>Username</span>
             <input
-              type="email"
-              value={form.email}
-              onChange={(event) => updateField('email', event.target.value)}
-              placeholder="captain@club.com"
+              value={form.username}
+              onChange={(event) =>
+                updateField('username', event.target.value.toLowerCase().replace(/[^a-z0-9_]/g, ''))
+              }
+              placeholder="captain_12"
               required
-              autoComplete="email"
+              minLength={3}
+              maxLength={24}
+              autoComplete="username"
             />
           </label>
 
@@ -104,7 +107,7 @@ export default function Login() {
               type="password"
               value={form.password}
               onChange={(event) => updateField('password', event.target.value)}
-              placeholder="••••••••"
+              placeholder="Password"
               required
               autoComplete="current-password"
             />

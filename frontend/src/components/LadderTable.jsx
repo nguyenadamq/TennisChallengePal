@@ -63,6 +63,7 @@ export default function LadderTable({
                           <div className="inline-actions">
                             <button
                               className="tiny-button"
+                              type="button"
                               onClick={() => onMove(entry.entry_id, entry.rank_position - 1)}
                               disabled={busyAction === `move-${entry.entry_id}` || index === 0}
                             >
@@ -70,6 +71,7 @@ export default function LadderTable({
                             </button>
                             <button
                               className="tiny-button"
+                              type="button"
                               onClick={() => onMove(entry.entry_id, entry.rank_position + 1)}
                               disabled={
                                 busyAction === `move-${entry.entry_id}` ||
@@ -80,6 +82,7 @@ export default function LadderTable({
                             </button>
                             <button
                               className="tiny-button tiny-button-danger"
+                              type="button"
                               onClick={() => onRemove(entry.entry_id)}
                               disabled={busyAction === `remove-${entry.entry_id}`}
                             >

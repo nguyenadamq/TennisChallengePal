@@ -2,20 +2,17 @@
 
 :root {
   color: #1f2937;
-  background:
-    radial-gradient(circle at top left, rgba(0, 184, 217, 0.26), transparent 26%),
-    radial-gradient(circle at top right, rgba(247, 37, 133, 0.18), transparent 24%),
-    linear-gradient(155deg, #fff4e6 0%, #f7fbff 44%, #d9f6ff 100%);
-  --color-surface: rgba(255, 244, 230, 0.76);
-  --color-surface-strong: rgba(255, 244, 230, 0.9);
-  --color-border: rgba(0, 119, 182, 0.18);
+  background: #f4f7f2;
+  --color-surface: rgba(255, 255, 255, 0.9);
+  --color-surface-strong: #ffffff;
+  --color-border: rgba(30, 64, 53, 0.16);
   --color-text: #1f2937;
   --color-muted: #4b5563;
-  --color-accent: #0077b6;
-  --color-accent-strong: #00b8d9;
-  --color-danger: #f72585;
-  --color-success: #00b8d9;
-  --color-shadow: rgba(0, 119, 182, 0.14);
+  --color-accent: #1f7a5c;
+  --color-accent-strong: #0f9f7a;
+  --color-danger: #b42358;
+  --color-success: #237a4f;
+  --color-shadow: rgba(31, 41, 55, 0.08);
 }
 
 * {
@@ -32,8 +29,8 @@ body {
   margin: 0;
   font-family: "Sora", "Segoe UI", "Trebuchet MS", sans-serif;
   background:
-    linear-gradient(135deg, rgba(0, 184, 217, 0.16), transparent 38%),
-    linear-gradient(180deg, rgba(247, 37, 133, 0.08), transparent 100%);
+    linear-gradient(180deg, rgba(244, 247, 242, 0.98), rgba(226, 235, 226, 0.96)),
+    #f4f7f2;
   color: var(--color-text);
 }
 
@@ -43,8 +40,8 @@ body::before {
   inset: 0;
   pointer-events: none;
   background-image:
-    linear-gradient(rgba(0, 119, 182, 0.04) 1px, transparent 1px),
-    linear-gradient(90deg, rgba(0, 119, 182, 0.04) 1px, transparent 1px);
+    linear-gradient(rgba(30, 64, 53, 0.05) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(30, 64, 53, 0.05) 1px, transparent 1px);
   background-size: 64px 64px;
   mask-image: linear-gradient(180deg, rgba(0, 0, 0, 0.65), transparent 92%);
 }

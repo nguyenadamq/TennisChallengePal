@@ -2,10 +2,10 @@ import { NextResponse } from 'next/server'
 import { requireProfile } from '../../../lib/serverSupabase'
 import { consumeRateLimit } from '../../../lib/rateLimit'
 
-const JSON_HEADERS = {
-  'Cache-Control': 'no-store',
-}
-
+const JSON_HEADERS = { 'Cache-Control': 'no-store' }
+const UUID_PATTERN =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i
+const USERNAME_PATTERN = /^[a-z0-9_]{3,24}$/
 const LADDER_CODES = new Set([
   'mens_singles',
   'mens_doubles',
@@ -13,16 +13,13 @@ const LADDER_CODES = new Set([
   'womens_singles',
   'womens_doubles',
 ])
-
-const REQUEST_TYPES = new Set(['join', 'challenge'])
-const REQUEST_DECISIONS = new Set(['approved', 'rejected'])
-const UUID_PATTERN =
-  /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i
-const USERNAME_PATTERN = /^[a-z0-9_]{3,24}$/
-const MAX_JSON_BODY_CHARS = 10_000
-const MAX_MESSAGE_LENGTH = 500
-const MAX_PASSWORD_LENGTH = 200
-const MAX_RANK = 999
+const LADDER_REQUEST_TYPES = new Set(['join', 'challenge'])
+const CLUB_ROLES = new Set(['member', 'officer', 'president'])
+const NOTIFICATION_CATEGORIES = new Set(['social', 'club', 'court'])
+const COURT_PLAY_TYPES = new Set(['singles', 'doubles', 'either'])
+const COURT_LOCATION_TYPES = new Set(['osu', 'custom'])
+const DECISIONS = new Set(['approved', 'rejected'])
+const MAX_JSON_BODY_CHARS = 20_000
 
 class RequestValidationError extends Error {
   constructor(message, status = 400) {
@@ -44,28 +41,19 @@ function json(body, status = 200, extraHeaders = {}) {
 
 function getClientAddress(request) {
   const forwardedFor = request.headers.get('x-forwarded-for')
-
-  if (forwardedFor) {
-    return forwardedFor.split(',')[0].trim()
-  }
-
-  return request.headers.get('x-real-ip') || 'unknown'
+  return forwardedFor?.split(',')[0]?.trim() || request.headers.get('x-real-ip') || 'unknown'
 }
 
-function ensureJsonRequest(request) {
+async function parseJsonBody(request) {
   const contentType = request.headers.get('content-type') || ''
 
   if (!contentType.toLowerCase().includes('application/json')) {
     throw new RequestValidationError('JSON requests are required.', 415)
   }
-}
-
-async function parseJsonBody(request) {
-  ensureJsonRequest(request)
 
   const rawBody = await request.text()
 
-  if (!rawBody || !rawBody.trim()) {
+  if (!rawBody.trim()) {
     throw new RequestValidationError('Request body is required.')
   }
 
@@ -88,7 +76,7 @@ function ensurePlainObject(value, message = 'Invalid request payload.') {
   return value
 }
 
-function normalizeOptionalText(value, fieldName, maxLength = MAX_MESSAGE_LENGTH) {
+function optionalText(value, fieldName, maxLength = 500) {
   if (value == null) {
     return null
   }
@@ -110,8 +98,8 @@ function normalizeOptionalText(value, fieldName, maxLength = MAX_MESSAGE_LENGTH)
   return normalized
 }
 
-function normalizeRequiredText(value, fieldName, maxLength) {
-  const normalized = normalizeOptionalText(value, fieldName, maxLength)
+function requiredText(value, fieldName, maxLength = 120) {
+  const normalized = optionalText(value, fieldName, maxLength)
 
   if (!normalized) {
     throw new RequestValidationError(`${fieldName} is required.`)
@@ -120,7 +108,7 @@ function normalizeRequiredText(value, fieldName, maxLength) {
   return normalized
 }
 
-function normalizeUuid(value, fieldName) {
+function uuid(value, fieldName) {
   if (typeof value !== 'string' || !UUID_PATTERN.test(value.trim())) {
     throw new RequestValidationError(`${fieldName} must be a valid id.`)
   }
@@ -128,15 +116,27 @@ function normalizeUuid(value, fieldName) {
   return value.trim().toLowerCase()
 }
 
-function normalizeOptionalUuid(value, fieldName) {
-  if (value == null) {
+function optionalUuid(value, fieldName) {
+  if (value == null || value === '') {
     return null
   }
 
-  return normalizeUuid(value, fieldName)
+  return uuid(value, fieldName)
 }
 
-function normalizeUsername(value, fieldName) {
+function uuidArray(value, fieldName) {
+  if (value == null) {
+    return []
+  }
+
+  if (!Array.isArray(value)) {
+    throw new RequestValidationError(`${fieldName} must be a list.`)
+  }
+
+  return [...new Set(value.map((item) => uuid(item, fieldName)))]
+}
+
+function username(value, fieldName) {
   if (typeof value !== 'string') {
     throw new RequestValidationError(`${fieldName} must be a username.`)
   }
@@ -150,47 +150,53 @@ function normalizeUsername(value, fieldName) {
   return normalized
 }
 
-function normalizeOptionalUsername(value, fieldName) {
-  if (value == null) {
+function optionalUsername(value, fieldName) {
+  if (value == null || value === '') {
     return null
   }
 
-  return normalizeUsername(value, fieldName)
+  return username(value, fieldName)
 }
 
-function normalizeLadderCode(value, fieldName) {
-  if (typeof value !== 'string' || !LADDER_CODES.has(value)) {
+function enumValue(value, allowed, fieldName) {
+  if (typeof value !== 'string' || !allowed.has(value)) {
     throw new RequestValidationError(`${fieldName} is invalid.`)
   }
 
   return value
 }
 
-function normalizeOptionalLadderCode(value, fieldName) {
-  if (value == null) {
+function optionalEnumValue(value, allowed, fieldName) {
+  if (value == null || value === '') {
     return null
   }
 
-  return normalizeLadderCode(value, fieldName)
+  return enumValue(value, allowed, fieldName)
 }
 
-function normalizePositiveInteger(value, fieldName) {
-  if (!Number.isInteger(value) || value < 1 || value > MAX_RANK) {
+function optionalPositiveInteger(value, fieldName, max = 999) {
+  if (value == null || value === '') {
+    return null
+  }
+
+  if (!Number.isInteger(value) || value < 1 || value > max) {
     throw new RequestValidationError(`${fieldName} must be a positive whole number.`)
   }
 
   return value
 }
 
-function normalizeOptionalPositiveInteger(value, fieldName) {
-  if (value == null) {
-    return null
+function requiredPositiveInteger(value, fieldName, max = 999) {
+  const normalized = optionalPositiveInteger(value, fieldName, max)
+
+  if (normalized == null) {
+    throw new RequestValidationError(`${fieldName} is required.`)
   }
 
-  return normalizePositiveInteger(value, fieldName)
+  return normalized
 }
 
-function normalizeBoolean(value, fieldName) {
+function booleanValue(value, fieldName) {
   if (typeof value !== 'boolean') {
     throw new RequestValidationError(`${fieldName} must be true or false.`)
   }
@@ -198,92 +204,118 @@ function normalizeBoolean(value, fieldName) {
   return value
 }
 
+function optionalBoolean(value, fieldName) {
+  if (value == null) {
+    return false
+  }
+
+  return booleanValue(value, fieldName)
+}
+
+function futureDate(value, fieldName) {
+  if (typeof value !== 'string') {
+    throw new RequestValidationError(`${fieldName} must be a date.`)
+  }
+
+  const date = new Date(value)
+
+  if (Number.isNaN(date.getTime())) {
+    throw new RequestValidationError(`${fieldName} must be a valid date.`)
+  }
+
+  return date.toISOString()
+}
+
 const RPC_CONFIG = {
-  claim_admin_role: {
-    rateLimit: { limit: 5, windowMs: 15 * 60 * 1000, scope: 'user_ip' },
+  create_club: {
+    rateLimit: { limit: 8, windowMs: 10 * 60 * 1000, scope: 'user' },
     sanitizePayload(payload) {
       return {
-        p_password: normalizeRequiredText(payload.p_password, 'Officer password', MAX_PASSWORD_LENGTH),
+        p_name: requiredText(payload.p_name, 'Club name', 80),
+        p_password: requiredText(payload.p_password, 'Club password', 200),
+      }
+    },
+  },
+  join_club: {
+    rateLimit: { limit: 20, windowMs: 10 * 60 * 1000, scope: 'user_ip' },
+    sanitizePayload(payload) {
+      return {
+        p_name: requiredText(payload.p_name, 'Club name', 80),
+        p_password: requiredText(payload.p_password, 'Club password', 200),
+      }
+    },
+  },
+  set_club_member_role: {
+    rateLimit: { limit: 40, windowMs: 10 * 60 * 1000, scope: 'user' },
+    sanitizePayload(payload) {
+      return {
+        p_club_id: uuid(payload.p_club_id, 'Club'),
+        p_member_id: uuid(payload.p_member_id, 'Member'),
+        p_role: enumValue(payload.p_role, CLUB_ROLES, 'Club role'),
+      }
+    },
+  },
+  transfer_club_presidency: {
+    rateLimit: { limit: 10, windowMs: 10 * 60 * 1000, scope: 'user' },
+    sanitizePayload(payload) {
+      return {
+        p_club_id: uuid(payload.p_club_id, 'Club'),
+        p_new_president_id: uuid(payload.p_new_president_id, 'New president'),
+      }
+    },
+  },
+  search_users_by_username: {
+    rateLimit: { limit: 30, windowMs: 60 * 1000, scope: 'user_ip' },
+    sanitizePayload(payload) {
+      return {
+        p_query: username(payload.p_query, 'Username'),
+      }
+    },
+  },
+  send_friend_request: {
+    rateLimit: { limit: 15, windowMs: 10 * 60 * 1000, scope: 'user_ip' },
+    sanitizePayload(payload) {
+      return {
+        p_username: username(payload.p_username, 'Username'),
+      }
+    },
+  },
+  respond_to_friend_request: {
+    rateLimit: { limit: 30, windowMs: 10 * 60 * 1000, scope: 'user' },
+    sanitizePayload(payload) {
+      return {
+        p_request_id: uuid(payload.p_request_id, 'Friend request'),
+        p_accept: booleanValue(payload.p_accept, 'Accept'),
+      }
+    },
+  },
+  mark_notification_read: {
+    rateLimit: { limit: 80, windowMs: 60 * 1000, scope: 'user' },
+    sanitizePayload(payload) {
+      return {
+        p_notification_id: uuid(payload.p_notification_id, 'Notification'),
+      }
+    },
+  },
+  mark_category_notifications_read: {
+    rateLimit: { limit: 30, windowMs: 60 * 1000, scope: 'user' },
+    sanitizePayload(payload) {
+      return {
+        p_category: enumValue(payload.p_category, NOTIFICATION_CATEGORIES, 'Notification category'),
       }
     },
   },
   submit_ladder_request: {
-    rateLimit: { limit: 12, windowMs: 10 * 60 * 1000, scope: 'user' },
-    sanitizePayload(payload) {
-      const requestType = typeof payload.p_request_type === 'string' ? payload.p_request_type : null
-
-      if (!REQUEST_TYPES.has(requestType)) {
-        throw new RequestValidationError('Request type is invalid.')
-      }
-
-      return {
-        p_ladder_code: normalizeLadderCode(payload.p_ladder_code, 'Ladder'),
-        p_request_type: requestType,
-        p_target_rank: normalizeOptionalPositiveInteger(payload.p_target_rank, 'Target rank'),
-        p_message: normalizeOptionalText(payload.p_message, 'Message'),
-        p_partner_username: normalizeOptionalUsername(payload.p_partner_username, 'Partner username'),
-        p_drop_ladder_code: normalizeOptionalLadderCode(payload.p_drop_ladder_code, 'Drop ladder'),
-      }
-    },
-  },
-  admin_add_user_to_ladder: {
-    adminOnly: true,
-    rateLimit: { limit: 25, windowMs: 10 * 60 * 1000, scope: 'user' },
-    sanitizePayload(payload) {
-      const userId = normalizeUuid(payload.p_user_id, 'Primary player')
-      const partnerUserId = normalizeOptionalUuid(payload.p_partner_user_id, 'Partner')
-
-      if (partnerUserId && partnerUserId === userId) {
-        throw new RequestValidationError('A doubles team needs two different users.')
-      }
-
-      return {
-        p_ladder_code: normalizeLadderCode(payload.p_ladder_code, 'Ladder'),
-        p_user_id: userId,
-        p_partner_user_id: partnerUserId,
-        p_rank: normalizeOptionalPositiveInteger(payload.p_rank, 'Starting rank'),
-      }
-    },
-  },
-  admin_move_ladder_entry: {
-    adminOnly: true,
-    rateLimit: { limit: 40, windowMs: 10 * 60 * 1000, scope: 'user' },
+    rateLimit: { limit: 20, windowMs: 10 * 60 * 1000, scope: 'user' },
     sanitizePayload(payload) {
       return {
-        p_entry_id: normalizeUuid(payload.p_entry_id, 'Entry'),
-        p_new_rank: normalizePositiveInteger(payload.p_new_rank, 'New rank'),
-      }
-    },
-  },
-  admin_remove_ladder_entry: {
-    adminOnly: true,
-    rateLimit: { limit: 25, windowMs: 10 * 60 * 1000, scope: 'user' },
-    sanitizePayload(payload) {
-      return {
-        p_entry_id: normalizeUuid(payload.p_entry_id, 'Entry'),
-      }
-    },
-  },
-  admin_resolve_request: {
-    adminOnly: true,
-    rateLimit: { limit: 30, windowMs: 10 * 60 * 1000, scope: 'user' },
-    sanitizePayload(payload) {
-      if (typeof payload.p_decision !== 'string' || !REQUEST_DECISIONS.has(payload.p_decision)) {
-        throw new RequestValidationError('Decision is invalid.')
-      }
-
-      return {
-        p_request_id: normalizeUuid(payload.p_request_id, 'Request'),
-        p_decision: payload.p_decision,
-        p_rank: normalizeOptionalPositiveInteger(payload.p_rank, 'Rank override'),
-      }
-    },
-  },
-  member_drop_own_ladder_entry: {
-    rateLimit: { limit: 15, windowMs: 10 * 60 * 1000, scope: 'user' },
-    sanitizePayload(payload) {
-      return {
-        p_entry_id: normalizeUuid(payload.p_entry_id, 'Entry'),
+        p_club_id: uuid(payload.p_club_id, 'Club'),
+        p_ladder_code: enumValue(payload.p_ladder_code, LADDER_CODES, 'Ladder'),
+        p_request_type: enumValue(payload.p_request_type, LADDER_REQUEST_TYPES, 'Request type'),
+        p_target_rank: optionalPositiveInteger(payload.p_target_rank, 'Target rank'),
+        p_message: optionalText(payload.p_message, 'Message', 500),
+        p_partner_username: optionalUsername(payload.p_partner_username, 'Partner username'),
+        p_drop_ladder_code: optionalEnumValue(payload.p_drop_ladder_code, LADDER_CODES, 'Drop ladder'),
       }
     },
   },
@@ -291,42 +323,99 @@ const RPC_CONFIG = {
     rateLimit: { limit: 20, windowMs: 10 * 60 * 1000, scope: 'user' },
     sanitizePayload(payload) {
       return {
-        p_request_id: normalizeUuid(payload.p_request_id, 'Request'),
-        p_accept: normalizeBoolean(payload.p_accept, 'Accept'),
-        p_drop_ladder_code: normalizeOptionalLadderCode(payload.p_drop_ladder_code, 'Drop ladder'),
+        p_request_id: uuid(payload.p_request_id, 'Ladder request'),
+        p_accept: booleanValue(payload.p_accept, 'Accept'),
+        p_drop_ladder_code: optionalEnumValue(payload.p_drop_ladder_code, LADDER_CODES, 'Drop ladder'),
       }
     },
   },
-  search_users_by_username: {
-    rateLimit: { limit: 20, windowMs: 60 * 1000, scope: 'user_ip' },
+  officer_add_ladder_entry: {
+    rateLimit: { limit: 35, windowMs: 10 * 60 * 1000, scope: 'user' },
     sanitizePayload(payload) {
       return {
-        p_query: normalizeUsername(payload.p_query, 'Username'),
+        p_club_id: uuid(payload.p_club_id, 'Club'),
+        p_ladder_code: enumValue(payload.p_ladder_code, LADDER_CODES, 'Ladder'),
+        p_user_id: uuid(payload.p_user_id, 'Player'),
+        p_partner_user_id: optionalUuid(payload.p_partner_user_id, 'Partner'),
+        p_rank: optionalPositiveInteger(payload.p_rank, 'Rank'),
       }
     },
   },
-  send_friend_request: {
-    rateLimit: { limit: 10, windowMs: 10 * 60 * 1000, scope: 'user_ip' },
+  officer_move_ladder_entry: {
+    rateLimit: { limit: 60, windowMs: 10 * 60 * 1000, scope: 'user' },
     sanitizePayload(payload) {
       return {
-        p_username: normalizeUsername(payload.p_username, 'Username'),
+        p_entry_id: uuid(payload.p_entry_id, 'Ladder entry'),
+        p_new_rank: requiredPositiveInteger(payload.p_new_rank, 'Rank'),
       }
     },
   },
-  respond_to_friend_request: {
+  officer_remove_ladder_entry: {
+    rateLimit: { limit: 35, windowMs: 10 * 60 * 1000, scope: 'user' },
+    sanitizePayload(payload) {
+      return {
+        p_entry_id: uuid(payload.p_entry_id, 'Ladder entry'),
+      }
+    },
+  },
+  officer_resolve_ladder_request: {
+    rateLimit: { limit: 35, windowMs: 10 * 60 * 1000, scope: 'user' },
+    sanitizePayload(payload) {
+      return {
+        p_request_id: uuid(payload.p_request_id, 'Ladder request'),
+        p_decision: enumValue(payload.p_decision, DECISIONS, 'Decision'),
+        p_rank: optionalPositiveInteger(payload.p_rank, 'Rank'),
+      }
+    },
+  },
+  member_drop_own_ladder_entry: {
     rateLimit: { limit: 20, windowMs: 10 * 60 * 1000, scope: 'user' },
     sanitizePayload(payload) {
       return {
-        p_request_id: normalizeUuid(payload.p_request_id, 'Request'),
-        p_accept: normalizeBoolean(payload.p_accept, 'Accept'),
+        p_entry_id: uuid(payload.p_entry_id, 'Ladder entry'),
       }
     },
   },
-  mark_notification_read: {
-    rateLimit: { limit: 60, windowMs: 60 * 1000, scope: 'user' },
+  create_court: {
+    rateLimit: { limit: 20, windowMs: 10 * 60 * 1000, scope: 'user' },
     sanitizePayload(payload) {
       return {
-        p_notification_id: normalizeUuid(payload.p_notification_id, 'Notification'),
+        p_play_type: enumValue(payload.p_play_type, COURT_PLAY_TYPES, 'Play type'),
+        p_description: optionalText(payload.p_description, 'Description', 280),
+        p_scheduled_at: futureDate(payload.p_scheduled_at, 'Court time'),
+        p_location_type: enumValue(payload.p_location_type, COURT_LOCATION_TYPES, 'Location type'),
+        p_custom_location: optionalText(payload.p_custom_location, 'Custom location', 120),
+        p_osu_court_number: optionalPositiveInteger(payload.p_osu_court_number, 'OSU court number', 10),
+        p_broadcast_public: optionalBoolean(payload.p_broadcast_public, 'Public broadcast'),
+        p_broadcast_friends: optionalBoolean(payload.p_broadcast_friends, 'Friends broadcast'),
+        p_broadcast_club_ids: uuidArray(payload.p_broadcast_club_ids, 'Club broadcasts'),
+        p_invited_friend_ids: uuidArray(payload.p_invited_friend_ids, 'Friend invites'),
+      }
+    },
+  },
+  request_join_court: {
+    rateLimit: { limit: 30, windowMs: 10 * 60 * 1000, scope: 'user' },
+    sanitizePayload(payload) {
+      return {
+        p_court_id: uuid(payload.p_court_id, 'Court'),
+      }
+    },
+  },
+  respond_court_join_request: {
+    rateLimit: { limit: 40, windowMs: 10 * 60 * 1000, scope: 'user' },
+    sanitizePayload(payload) {
+      return {
+        p_request_id: uuid(payload.p_request_id, 'Court join request'),
+        p_accept: booleanValue(payload.p_accept, 'Accept'),
+      }
+    },
+  },
+  respond_court_invite: {
+    rateLimit: { limit: 40, windowMs: 10 * 60 * 1000, scope: 'user' },
+    sanitizePayload(payload) {
+      return {
+        p_invite_id: uuid(payload.p_invite_id, 'Court invite'),
+        p_accept: booleanValue(payload.p_accept, 'Accept'),
       }
     },
   },
@@ -337,7 +426,6 @@ function applyRateLimit(request, profile, functionName, config) {
     return null
   }
 
-  const clientAddress = getClientAddress(request)
   const scopeParts = [functionName]
 
   if (config.rateLimit.scope.includes('user')) {
@@ -345,7 +433,7 @@ function applyRateLimit(request, profile, functionName, config) {
   }
 
   if (config.rateLimit.scope.includes('ip')) {
-    scopeParts.push(clientAddress)
+    scopeParts.push(getClientAddress(request))
   }
 
   const result = consumeRateLimit({
@@ -377,10 +465,6 @@ export async function POST(request) {
       return json({ error: 'RPC not allowed.' }, 400)
     }
 
-    if (config.adminOnly && profile.role !== 'officer') {
-      return json({ error: 'Officer access is required.' }, 403)
-    }
-
     const rateLimitResponse = applyRateLimit(request, profile, functionName, config)
 
     if (rateLimitResponse) {
@@ -397,7 +481,6 @@ export async function POST(request) {
     return json({ data: data ?? null })
   } catch (error) {
     const status = error instanceof RequestValidationError ? error.status : 401
-
     return json({ error: error.message || 'Unable to complete the request.' }, status)
   }
 }

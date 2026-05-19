@@ -1,194 +1,201 @@
 'use client'
 
-import { startTransition, useCallback, useEffect, useState } from 'react'
+import { startTransition, useCallback, useEffect, useMemo, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import LadderTable from '../components/LadderTable'
 import { DOUBLES_LADDERS, LADDER_ORDER, LADDER_RULE_COPY } from '../lib/constants'
 import { supabase } from '../lib/supabaseClient'
-import { claimAdminRole, signOut, waitForProfile } from '../services/auth'
+import { signOut } from '../services/auth'
 import {
-  createManualEntry,
-  dropOwnEntry,
+  createClub,
+  createCourt,
   fetchDashboardData,
-  moveEntry,
-  removeEntry,
-  resolveRequest,
-  respondToPartnerInvite,
-  submitLadderRequest,
-} from '../services/ladder'
-import {
+  joinClub,
+  markCategoryNotificationsRead,
   markNotificationRead,
+  memberDropOwnLadderEntry,
+  officerAddLadderEntry,
+  officerMoveLadderEntry,
+  officerRemoveLadderEntry,
+  officerResolveLadderRequest,
+  requestJoinCourt,
+  respondCourtInvite,
+  respondCourtJoinRequest,
   respondToFriendRequest,
+  respondToPartnerLadderInvite,
   searchUsersByUsername,
   sendFriendRequest,
-} from '../services/social'
+  setClubMemberRole,
+  submitLadderRequest,
+  transferClubPresidency,
+} from '../services/app'
 
-const requestDefaults = {
+const createClubDefaults = { name: '', password: '' }
+const joinClubDefaults = { name: '', password: '' }
+const ladderRequestDefaults = {
   ladderCode: LADDER_ORDER[0],
   requestType: 'join',
   targetRank: '',
-  message: '',
   partnerUsername: '',
   dropLadderCode: '',
+  message: '',
 }
-
-const adminDefaults = {
+const adminEntryDefaults = {
   ladderCode: LADDER_ORDER[0],
   userId: '',
   partnerUserId: '',
-  rankPosition: '',
+  rank: '',
+}
+const courtDefaults = {
+  playType: 'singles',
+  description: '',
+  date: '',
+  time: '',
+  locationType: 'osu',
+  customLocation: '',
+  osuCourtNumber: 1,
+  broadcastPublic: false,
+  broadcastFriends: true,
+  broadcastClubIds: [],
+  invitedFriendIds: [],
+}
+const EMPTY_LIST = []
+
+function formatSex(value) {
+  return value === 'woman' ? 'Woman' : 'Man'
 }
 
-function formatRoleLabel(value) {
-  return value === 'officer' ? 'Officer' : 'Member'
+function formatAgeGroup(value) {
+  if (value === 'high_school') {
+    return 'High school'
+  }
+
+  if (value === 'college') {
+    return 'College'
+  }
+
+  return 'Adult'
 }
 
-function formatGenderShort(value) {
-  return value === 'female' ? 'F' : 'M'
+function formatRole(value) {
+  if (value === 'president') {
+    return 'President'
+  }
+
+  if (value === 'officer') {
+    return 'Officer'
+  }
+
+  return 'Member'
 }
 
-function isValidDoublesPartnerForLadder(playerGender, partnerGender, ladderCode) {
-  if (!partnerGender) {
-    return false
-  }
-
-  if (ladderCode === 'mixed_doubles') {
-    return playerGender !== partnerGender
-  }
-
-  if (ladderCode === 'mens_doubles') {
-    return playerGender === 'male' && partnerGender === 'male'
-  }
-
-  if (ladderCode === 'womens_doubles') {
-    return playerGender === 'female' && partnerGender === 'female'
-  }
-
-  return true
+function roleCanManage(role) {
+  return role === 'officer' || role === 'president'
 }
 
-function HomeTab({
-  profile,
-  myEntries,
-  adminPromotionPassword,
-  setAdminPromotionPassword,
-  busyAction,
-  handleAdminPromotion,
-}) {
+function formatDateTime(value) {
+  if (!value) {
+    return ''
+  }
+
+  return new Intl.DateTimeFormat(undefined, {
+    dateStyle: 'medium',
+    timeStyle: 'short',
+  }).format(new Date(value))
+}
+
+function notificationCounts(notifications) {
+  return notifications
+    .filter((notification) => !notification.read_at)
+    .reduce(
+      (counts, notification) => ({
+        ...counts,
+        total: counts.total + 1,
+        [notification.category]: counts[notification.category] + 1,
+      }),
+      { total: 0, club: 0, social: 0, court: 0 },
+    )
+}
+
+function NotificationList({ category, notifications, open, onToggle, onRead, onReadCategory }) {
+  const categoryNotifications = notifications.filter((notification) => notification.category === category)
+  const unreadCount = categoryNotifications.filter((notification) => !notification.read_at).length
+
   return (
-    <>
-      <section className="info-grid">
-        <article className="panel">
-          <p className="eyebrow">How It Works</p>
-          <p>{LADDER_RULE_COPY[profile.gender].summary}</p>
-          <p className="muted-text">{LADDER_RULE_COPY[profile.gender].challenge}</p>
-        </article>
-        <article className="panel">
-          <p className="eyebrow">Doubles Requests</p>
-          <p>Invite a confirmed friend for doubles. Your friend must accept before the request moves to officers.</p>
-          <p className="muted-text">
-            If either player is already on two ladders, they choose which ladder will drop only if the officer later approves the request.
-          </p>
-        </article>
-        <article className="panel">
-          <p className="eyebrow">Your Snapshot</p>
-          <h2>{myEntries.length} active ladders</h2>
-          <div className="mini-list">
-            {myEntries.length ? (
-              myEntries.map((entry) => (
-                <div key={entry.entry_id} className="mini-item">
-                  <strong>{entry.ladder_name}</strong>
-                  <span>Rank #{entry.rank_position}</span>
+    <section className="panel panel-subtle">
+      <button className="section-toggle" type="button" onClick={onToggle}>
+        <span>
+          <span className="eyebrow">{category} notifications</span>
+          <strong>{unreadCount} unread</strong>
+        </span>
+        <span className="count-pill">{open ? 'Hide' : 'Show'}</span>
+      </button>
+
+      {open ? (
+        <div className="notification-list">
+          <div className="inline-actions">
+            <button
+              className="tiny-button"
+              type="button"
+              disabled={!unreadCount}
+              onClick={() => onReadCategory(category)}
+            >
+              Mark category read
+            </button>
+          </div>
+          {categoryNotifications.length ? (
+            categoryNotifications.map((notification) => (
+              <div className="notification-item" key={notification.id}>
+                <div>
+                  <strong>{notification.title}</strong>
+                  <p className="muted-text">{notification.body}</p>
                 </div>
-              ))
-            ) : (
-              null
-            )}
-          </div>
-        </article>
-      </section>
-
-        <section className="content-grid">
-          <div className="panel panel-wide">
-          <div className="section-heading">
-            <div>
-              <p className="eyebrow">Start Here</p>
-            </div>
-          </div>
-          <div className="mini-list">
-            <div className="mini-item start-here-row">
-              <strong className="start-here-title">Browse live ladders</strong>
-              <span className="start-here-copy">Use the Leaderboards tab to view all rankings, your active ladders, and submit requests.</span>
-            </div>
-            <div className="mini-item start-here-row">
-              <strong className="start-here-title">Add friends</strong>
-              <span className="start-here-copy">Use the Friends tab to search usernames, accept requests, manage partner invites, and review notifications.</span>
-            </div>
-            <div className="mini-item start-here-row">
-              <strong className="start-here-title">Request a ladder move</strong>
-              <span className="start-here-copy">Join or challenge from Leaderboards, then track status in your request list.</span>
-            </div>
-          </div>
+                {!notification.read_at ? (
+                  <button
+                    className="tiny-button"
+                    type="button"
+                    onClick={() => onRead(notification.id)}
+                  >
+                    Read
+                  </button>
+                ) : (
+                  <span className="status-pill">Read</span>
+                )}
+              </div>
+            ))
+          ) : (
+            <p className="muted-text">No notifications in this category.</p>
+          )}
         </div>
-
-        <aside className="sidebar-stack">
-          <section className="panel">
-            <p className="eyebrow">Profile Settings</p>
-            <h2>Officer access</h2>
-            {profile.role === 'officer' ? (
-              <p className="muted-text">This account already has officer access.</p>
-            ) : (
-              <form className="form-stack compact-form" onSubmit={handleAdminPromotion}>
-                <label>
-                  <input
-                    type="password"
-                    value={adminPromotionPassword}
-                    onChange={(event) => setAdminPromotionPassword(event.target.value)}
-                    placeholder="Enter officer password"
-                    required
-                  />
-                </label>
-                <button
-                  className="primary-button"
-                  type="submit"
-                  disabled={busyAction === 'claim-admin' || !adminPromotionPassword.trim()}
-                >
-                  {busyAction === 'claim-admin' ? 'Verifying...' : 'Promote to officer'}
-                </button>
-              </form>
-            )}
-          </section>
-        </aside>
-      </section>
-    </>
+      ) : null}
+    </section>
   )
 }
 
 export default function Dashboard() {
-  const [profile, setProfile] = useState(null)
-  const [ladders, setLadders] = useState([])
-  const [entries, setEntries] = useState([])
-  const [requests, setRequests] = useState([])
-  const [profiles, setProfiles] = useState([])
-  const [friends, setFriends] = useState([])
-  const [friendRequests, setFriendRequests] = useState([])
-  const [notifications, setNotifications] = useState([])
+  const [snapshot, setSnapshot] = useState(null)
   const [loading, setLoading] = useState(true)
   const [errorMessage, setErrorMessage] = useState('')
   const [successMessage, setSuccessMessage] = useState('')
-  const [requestForm, setRequestForm] = useState(requestDefaults)
-  const [adminForm, setAdminForm] = useState(adminDefaults)
+  const [busyAction, setBusyAction] = useState('')
+  const [activeTab, setActiveTab] = useState('club')
+  const [selectedClubId, setSelectedClubId] = useState('')
+  const [notificationsOpen, setNotificationsOpen] = useState(false)
+  const [categoryNotificationsOpen, setCategoryNotificationsOpen] = useState({
+    club: false,
+    social: false,
+    court: false,
+  })
+  const [createClubForm, setCreateClubForm] = useState(createClubDefaults)
+  const [joinClubForm, setJoinClubForm] = useState(joinClubDefaults)
+  const [ladderForm, setLadderForm] = useState(ladderRequestDefaults)
+  const [adminForm, setAdminForm] = useState(adminEntryDefaults)
+  const [rankOverrides, setRankOverrides] = useState({})
+  const [partnerDropChoices, setPartnerDropChoices] = useState({})
+  const [expandedSelfDropEntryId, setExpandedSelfDropEntryId] = useState(null)
   const [friendSearch, setFriendSearch] = useState('')
   const [searchResults, setSearchResults] = useState([])
-  const [busyAction, setBusyAction] = useState('')
-  const [adminPromotionPassword, setAdminPromotionPassword] = useState('')
-  const [inviteDropChoices, setInviteDropChoices] = useState({})
-  const [adminRankInputs, setAdminRankInputs] = useState({})
-  const [activeTab, setActiveTab] = useState('home')
-  const [archivedNotificationsOpen, setArchivedNotificationsOpen] = useState(false)
-  const [notificationsOpen, setNotificationsOpen] = useState(false)
-  const [dropConfirmEntry, setDropConfirmEntry] = useState(null)
-  const [expandedSelfDropEntryId, setExpandedSelfDropEntryId] = useState(null)
+  const [courtForm, setCourtForm] = useState(courtDefaults)
   const router = useRouter()
 
   const loadDashboard = useCallback(async () => {
@@ -201,18 +208,11 @@ export default function Dashboard() {
       return
     }
 
-    const nextProfile = await waitForProfile(session.user.id)
-    const snapshot = await fetchDashboardData(session.user.id, nextProfile.role === 'officer')
+    const data = await fetchDashboardData()
 
     startTransition(() => {
-      setProfile(nextProfile)
-      setLadders(snapshot.ladders)
-      setEntries(snapshot.entries)
-      setRequests(snapshot.requests)
-      setProfiles(snapshot.profiles)
-      setFriends(snapshot.friends)
-      setFriendRequests(snapshot.friendRequests)
-      setNotifications(snapshot.notifications)
+      setSnapshot(data)
+      setSelectedClubId((current) => current || data.clubs?.[0]?.id || '')
     })
   }, [router])
 
@@ -236,12 +236,31 @@ export default function Dashboard() {
     init()
 
     const channel = supabase
-      .channel('dashboard-live')
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'ladder_entries' }, () => loadDashboard().catch(() => {}))
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'ladder_requests' }, () => loadDashboard().catch(() => {}))
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'friend_requests' }, () => loadDashboard().catch(() => {}))
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'friendships' }, () => loadDashboard().catch(() => {}))
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'app_notifications' }, () => loadDashboard().catch(() => {}))
+      .channel('tennis-pal-live')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'app_notifications' }, () =>
+        loadDashboard().catch(() => {}),
+      )
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'club_memberships' }, () =>
+        loadDashboard().catch(() => {}),
+      )
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'friend_requests' }, () =>
+        loadDashboard().catch(() => {}),
+      )
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'ladder_entries' }, () =>
+        loadDashboard().catch(() => {}),
+      )
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'ladder_requests' }, () =>
+        loadDashboard().catch(() => {}),
+      )
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'courts' }, () =>
+        loadDashboard().catch(() => {}),
+      )
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'court_invites' }, () =>
+        loadDashboard().catch(() => {}),
+      )
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'court_join_requests' }, () =>
+        loadDashboard().catch(() => {}),
+      )
       .subscribe()
 
     return () => {
@@ -250,69 +269,45 @@ export default function Dashboard() {
     }
   }, [loadDashboard])
 
-  const getEntriesForLadder = useCallback((ladderId) => {
-    return entries
-      .filter((entry) => entry.ladder_id === ladderId)
-      .sort((left, right) => left.rank_position - right.rank_position)
-  }, [entries])
-
-  const myEntries = getEntriesForUser(profile?.id)
-  const challengeableLadders = ladders.filter((ladder) =>
-    canChallengeLadder(ladder.id, ladder.code),
+  const profile = snapshot?.profile
+  const clubs = snapshot?.clubs ?? []
+  const notifications = snapshot?.notifications ?? EMPTY_LIST
+  const counts = useMemo(() => notificationCounts(notifications), [notifications])
+  const selectedClub = clubs.find((club) => club.id === selectedClubId) || clubs[0] || null
+  const activeClubId = selectedClub?.id || ''
+  const selectedRole = selectedClub?.role || ''
+  const selectedMembers = (snapshot?.clubMembers ?? []).filter((member) => member.club_id === activeClubId)
+  const selectedEntries = (snapshot?.entries ?? []).filter((entry) => entry.club_id === activeClubId)
+  const selectedRequests = (snapshot?.ladderRequests ?? []).filter((request) => request.club_id === activeClubId)
+  const myEntries = selectedEntries.filter(
+    (entry) => entry.user_id === profile?.id || entry.partner_user_id === profile?.id,
   )
-  const selectedChallengeLadder =
-    challengeableLadders.find((ladder) => ladder.code === requestForm.ladderCode) ||
-    challengeableLadders[0] ||
-    null
-  const selectedChallengeLadderRank = selectedChallengeLadder
-    ? getCurrentRank(selectedChallengeLadder.id)
-    : null
+  const isClubOfficer = roleCanManage(selectedRole)
+  const isClubPresident = selectedRole === 'president'
+  const selectedLadder = (snapshot?.ladders ?? []).find((ladder) => ladder.code === ladderForm.ladderCode)
+  const selectedLadderEntries = selectedEntries.filter((entry) => entry.ladder_code === ladderForm.ladderCode)
+  const currentRank = selectedLadderEntries.find(
+    (entry) => entry.user_id === profile?.id || entry.partner_user_id === profile?.id,
+  )?.rank_position
+  const challengeOptions = currentRank
+    ? selectedLadderEntries.filter((entry) => {
+        const minRank = currentRank > 7 ? 1 : Math.max(1, currentRank - 3)
+        const maxRank = currentRank > 7 ? 7 : currentRank - 1
+        return entry.rank_position >= minRank && entry.rank_position <= maxRank
+      })
+    : []
+  const pendingPartnerInvites = selectedRequests.filter(
+    (request) => request.partner_user_id === profile?.id && request.status === 'pending_partner',
+  )
+  const pendingOfficerRequests = selectedRequests.filter((request) => request.status === 'pending_officer')
+  const incomingFriendRequests = (snapshot?.friendRequests ?? []).filter(
+    (request) => request.receiver_id === profile?.id && request.status === 'pending',
+  )
 
-  useEffect(() => {
-    if (!profile || requestForm.requestType !== 'challenge' || !challengeableLadders.length) {
-      return
-    }
-
-    const nextChallengeOptions =
-      selectedChallengeLadder && selectedChallengeLadderRank
-        ? getEntriesForLadder(selectedChallengeLadder.id).filter((entry) => {
-            const minimumAllowedRank =
-              selectedChallengeLadderRank > 7
-                ? 1
-                : Math.max(1, selectedChallengeLadderRank - 3)
-            const maximumAllowedRank =
-              selectedChallengeLadderRank > 7 ? 7 : selectedChallengeLadderRank - 1
-
-            return (
-              entry.rank_position >= minimumAllowedRank &&
-              entry.rank_position <= maximumAllowedRank
-            )
-          })
-        : []
-    const hasCurrentTarget = nextChallengeOptions.some(
-      (entry) => String(entry.rank_position) === requestForm.targetRank,
-    )
-
-    if (
-      selectedChallengeLadder.code !== requestForm.ladderCode ||
-      (!hasCurrentTarget && requestForm.targetRank)
-    ) {
-      setRequestForm((current) => ({
-        ...current,
-        ladderCode: selectedChallengeLadder.code,
-        targetRank: hasCurrentTarget ? current.targetRank : '',
-      }))
-    }
-  }, [
-    challengeableLadders,
-    profile,
-    requestForm.ladderCode,
-    requestForm.requestType,
-    requestForm.targetRank,
-    selectedChallengeLadder,
-    selectedChallengeLadderRank,
-    getEntriesForLadder,
-  ])
+  function setFlash(successText) {
+    setSuccessMessage(successText)
+    setErrorMessage('')
+  }
 
   async function runAction(actionKey, action, successText) {
     setBusyAction(actionKey)
@@ -321,7 +316,7 @@ export default function Dashboard() {
     try {
       await action()
       await loadDashboard()
-      setSuccessMessage(successText)
+      setFlash(successText)
     } catch (error) {
       setErrorMessage(error.message)
       setSuccessMessage('')
@@ -330,165 +325,111 @@ export default function Dashboard() {
     }
   }
 
+  function updateCourtForm(field, value) {
+    setCourtForm((current) => ({ ...current, [field]: value }))
+  }
+
+  function toggleCourtClub(clubId) {
+    setCourtForm((current) => {
+      const hasClub = current.broadcastClubIds.includes(clubId)
+      return {
+        ...current,
+        broadcastClubIds: hasClub
+          ? current.broadcastClubIds.filter((id) => id !== clubId)
+          : [...current.broadcastClubIds, clubId],
+      }
+    })
+  }
+
+  function toggleCourtFriend(friendId) {
+    setCourtForm((current) => {
+      const hasFriend = current.invitedFriendIds.includes(friendId)
+      return {
+        ...current,
+        invitedFriendIds: hasFriend
+          ? current.invitedFriendIds.filter((id) => id !== friendId)
+          : [...current.invitedFriendIds, friendId],
+      }
+    })
+  }
+
   async function handleSignOut() {
     await signOut()
     router.replace('/login')
   }
 
-  function getEntriesForUser(userId) {
-    return entries.filter((entry) => entry.user_id === userId || entry.partner_user_id === userId)
-  }
-
-  function getDropOptionsForUser(userId) {
-    return getEntriesForUser(userId).map((entry) => ({
-      ladderCode: entry.ladder_code,
-      label:
-        entry.partner_user_id && (entry.user_id === userId || entry.partner_user_id === userId)
-          ? `${entry.ladder_name} (drops the full doubles team)`
-          : entry.ladder_name,
-    }))
-  }
-
-  function isEligibleForLadder(gender, ladderCode) {
-    return LADDER_RULE_COPY[gender]?.eligible.includes(ladderCode)
-  }
-
-  function getCurrentRank(ladderId) {
-    return (
-      getEntriesForLadder(ladderId).find(
-        (entry) => entry.user_id === profile?.id || entry.partner_user_id === profile?.id,
-      )?.rank_position || null
-    )
-  }
-
-  function canJoinLadder(ladderCode) {
-    if (!profile || !isEligibleForLadder(profile.gender, ladderCode)) {
-      return false
-    }
-
-    return !getEntriesForUser(profile.id).some((entry) => entry.ladder_code === ladderCode)
-  }
-
-  function canChallengeLadder(ladderId, ladderCode) {
-    if (!profile || !isEligibleForLadder(profile.gender, ladderCode)) {
-      return false
-    }
-
-    const rank = getCurrentRank(ladderId)
-    return Boolean(rank && rank > 1)
-  }
-
-  function getChallengeOptions(ladderId, ladderCode) {
-    if (!canChallengeLadder(ladderId, ladderCode)) {
-      return []
-    }
-
-    const currentRank = getCurrentRank(ladderId)
-    const minimumAllowedRank = currentRank > 7 ? 1 : Math.max(1, currentRank - 3)
-    const maximumAllowedRank = currentRank > 7 ? 7 : currentRank - 1
-
-    return getEntriesForLadder(ladderId).filter(
-      (entry) =>
-        entry.rank_position >= minimumAllowedRank &&
-        entry.rank_position <= maximumAllowedRank,
-    )
-  }
-
-  function getEligibleFriendsForLadder(ladderCode) {
-    return friends.filter((friend) => {
-      if (!isEligibleForLadder(friend.friend_gender, ladderCode)) {
-        return false
-      }
-
-      if (!isValidDoublesPartnerForLadder(profile?.gender, friend.friend_gender, ladderCode)) {
-        return false
-      }
-
-      return !entries.some(
-        (entry) =>
-          entry.ladder_code === ladderCode &&
-          (entry.user_id === friend.friend_id || entry.partner_user_id === friend.friend_id),
-      )
-    })
-  }
-
-  async function handleRequestSubmit(event) {
+  async function handleCreateClub(event) {
     event.preventDefault()
-
     await runAction(
-      'request',
+      'create-club',
       async () => {
-        if (requestForm.requestType === 'join' && DOUBLES_LADDERS.includes(requestForm.ladderCode)) {
-          const selectedFriend = friends.find(
-            (friend) => friend.friend_username === requestForm.partnerUsername,
-          )
-
-          if (!selectedFriend) {
-            throw new Error('Choose an eligible friend for doubles requests.')
-          }
-
-          if (
-            !isValidDoublesPartnerForLadder(
-              profile.gender,
-              selectedFriend.friend_gender,
-              requestForm.ladderCode,
-            )
-          ) {
-            if (requestForm.ladderCode === 'mixed_doubles') {
-              throw new Error('Mixed doubles requires one male player and one female player.')
-            }
-
-            throw new Error('That friend is not eligible for the selected doubles ladder.')
-          }
-        }
-
-        await submitLadderRequest({
-          ladderCode: requestForm.ladderCode,
-          requestType: requestForm.requestType,
-          targetRank:
-            requestForm.requestType === 'challenge' && requestForm.targetRank
-              ? Number(requestForm.targetRank)
-              : null,
-          message: requestForm.message,
-          partnerUsername:
-            requestForm.requestType === 'join' && DOUBLES_LADDERS.includes(requestForm.ladderCode)
-              ? requestForm.partnerUsername
-              : null,
-          dropLadderCode: requestForm.requestType === 'join' ? requestForm.dropLadderCode : null,
-        })
-
-        setRequestForm((current) => ({
-          ...requestDefaults,
-          ladderCode: current.ladderCode,
-        }))
+        await createClub(createClubForm)
+        setCreateClubForm(createClubDefaults)
       },
-      DOUBLES_LADDERS.includes(requestForm.ladderCode) && requestForm.requestType === 'join'
-        ? 'Invite sent to your friend. The officer team sees it after your partner accepts.'
-        : 'Request submitted to the officer queue.',
+      'Club created.',
+    )
+  }
+
+  async function handleJoinClub(event) {
+    event.preventDefault()
+    await runAction(
+      'join-club',
+      async () => {
+        await joinClub(joinClubForm)
+        setJoinClubForm(joinClubDefaults)
+      },
+      'Club joined.',
+    )
+  }
+
+  async function handleLadderSubmit(event) {
+    event.preventDefault()
+    await runAction(
+      'ladder-request',
+      async () => {
+        await submitLadderRequest({
+          clubId: activeClubId,
+          ladderCode: ladderForm.ladderCode,
+          requestType: ladderForm.requestType,
+          targetRank:
+            ladderForm.requestType === 'challenge' && ladderForm.targetRank
+              ? Number(ladderForm.targetRank)
+              : null,
+          partnerUsername:
+            ladderForm.requestType === 'join' && DOUBLES_LADDERS.includes(ladderForm.ladderCode)
+              ? ladderForm.partnerUsername
+              : null,
+          dropLadderCode:
+            ladderForm.requestType === 'join' && ladderForm.dropLadderCode
+              ? ladderForm.dropLadderCode
+              : null,
+          message: ladderForm.message,
+        })
+        setLadderForm((current) => ({ ...ladderRequestDefaults, ladderCode: current.ladderCode }))
+      },
+      DOUBLES_LADDERS.includes(ladderForm.ladderCode) && ladderForm.requestType === 'join'
+        ? 'Doubles invite sent.'
+        : 'Ladder request submitted.',
     )
   }
 
   async function handleAdminAdd(event) {
     event.preventDefault()
-
     await runAction(
-      'admin-add',
+      'admin-add-entry',
       async () => {
-        await createManualEntry({
+        await officerAddLadderEntry({
+          clubId: activeClubId,
           ladderCode: adminForm.ladderCode,
           userId: adminForm.userId,
-          partnerUserId: DOUBLES_LADDERS.includes(adminForm.ladderCode) ? adminForm.partnerUserId : null,
-          rankPosition: adminForm.rankPosition ? Number(adminForm.rankPosition) : null,
+          partnerUserId: DOUBLES_LADDERS.includes(adminForm.ladderCode)
+            ? adminForm.partnerUserId
+            : null,
+          rank: adminForm.rank ? Number(adminForm.rank) : null,
         })
-
-        setAdminForm((current) => ({
-          ...current,
-          userId: '',
-          partnerUserId: '',
-          rankPosition: '',
-        }))
+        setAdminForm((current) => ({ ...current, userId: '', partnerUserId: '', rank: '' }))
       },
-      'Leaderboard updated.',
+      'Ladder entry added.',
     )
   }
 
@@ -508,227 +449,131 @@ export default function Dashboard() {
     }
   }
 
-  async function handleAdminPromotion(event) {
+  async function handleCreateCourt(event) {
     event.preventDefault()
 
     await runAction(
-      'claim-admin',
+      'create-court',
       async () => {
-        await claimAdminRole(adminPromotionPassword)
-        setAdminPromotionPassword('')
+        if (!courtForm.date || !courtForm.time) {
+          throw new Error('Choose a date and time.')
+        }
+
+        if (courtForm.playType === 'doubles' && courtForm.invitedFriendIds.length > 0 && courtForm.invitedFriendIds.length < 3) {
+          throw new Error('Doubles friend invites need at least 3 friends.')
+        }
+
+        const scheduledAt = new Date(`${courtForm.date}T${courtForm.time}`).toISOString()
+
+        await createCourt({
+          playType: courtForm.playType,
+          description: courtForm.description,
+          scheduledAt,
+          locationType: courtForm.locationType,
+          customLocation: courtForm.locationType === 'custom' ? courtForm.customLocation : null,
+          osuCourtNumber:
+            courtForm.locationType === 'osu' ? Number(courtForm.osuCourtNumber) : null,
+          broadcastPublic: courtForm.broadcastPublic,
+          broadcastFriends: courtForm.broadcastFriends,
+          broadcastClubIds: courtForm.broadcastClubIds,
+          invitedFriendIds: courtForm.invitedFriendIds,
+        })
+        setCourtForm(courtDefaults)
       },
-      'Officer access enabled for this account.',
-    )
-  }
-
-  async function confirmSelfDrop() {
-    if (!dropConfirmEntry) {
-      return
-    }
-
-    const currentEntry = dropConfirmEntry
-
-    await runAction(
-      `self-drop-${currentEntry.entry_id}`,
-      async () => {
-        await dropOwnEntry(currentEntry.entry_id)
-        setDropConfirmEntry(null)
-      },
-      'Your ladder spot was dropped.',
-    )
-  }
-
-  async function handleInlineSelfDrop(entry) {
-    await runAction(
-      `self-drop-${entry.entry_id}`,
-      async () => {
-        await dropOwnEntry(entry.entry_id)
-        setExpandedSelfDropEntryId(null)
-      },
-      'Your ladder spot was dropped.',
+      'Court created.',
     )
   }
 
   if (loading) {
-    return <div className="app-loading">Loading Challenge Court...</div>
+    return <div className="app-loading">Loading Tennis Challenge Pal...</div>
   }
 
   if (!profile) {
-    return <div className="app-loading">Loading your player profile...</div>
+    return <div className="app-loading">Loading your profile...</div>
   }
 
-  const incomingFriendRequests = friendRequests.filter(
-    (request) => request.receiver_id === profile.id && request.status === 'pending',
-  )
-  const partnerInvites = requests.filter(
-    (request) => request.partner_user_id === profile.id && request.status === 'pending_partner',
-  )
-  const adminRequests = requests.filter((request) => request.status === 'pending_admin')
-  const unreadNotifications = notifications.filter((item) => !item.read_at)
-  const archivedNotifications = notifications.filter((item) => item.read_at)
-  const selectedLadder = ladders.find((ladder) => ladder.code === requestForm.ladderCode)
-  const joinAllowed = canJoinLadder(requestForm.ladderCode)
-  const challengeAllowed = canChallengeLadder(selectedLadder?.id, requestForm.ladderCode)
-  const challengeOptions = selectedLadder
-    ? getChallengeOptions(selectedLadder.id, selectedLadder.code)
-    : []
-  const needsDropChoice = requestForm.requestType === 'join' && myEntries.length >= 2 && joinAllowed
-  const eligibleFriendOptions = getEligibleFriendsForLadder(requestForm.ladderCode)
-  const unreadCount = unreadNotifications.length
-  const pendingSocialCount = incomingFriendRequests.length + partnerInvites.length
-  const playerOptions = profiles.map((entryProfile) => ({
-    label: `${entryProfile.display_name} (@${entryProfile.username})`,
-    value: entryProfile.id,
-  }))
   const navItems = [
-    { id: 'home', label: 'Home' },
-    { id: 'leaderboards', label: 'Leaderboards' },
-    { id: 'friends', label: 'Friends', badge: unreadCount > 0 ? unreadCount : null },
+    { id: 'club', label: 'Club', count: counts.club },
+    { id: 'social', label: 'Social', count: counts.social },
+    { id: 'court', label: 'Court Finder', count: counts.court },
   ]
-
-  if (profile.role === 'officer') {
-    navItems.push({ id: 'admin', label: 'Officer' })
-  }
 
   return (
     <main className="dashboard-shell">
-      <section className="topbar">
+      <header className="topbar">
         <div>
-          <h1 className="brand-title">Challenge Court</h1>
+          <p className="eyebrow">Tennis Challenge Pal</p>
+          <h1>{profile.full_name}</h1>
+          <p className="topbar-copy">
+            @{profile.username} | {formatSex(profile.sex)} | {formatAgeGroup(profile.age_group)}
+          </p>
         </div>
-
         <div className="topbar-actions">
-          <div className="profile-area">
-            <div className="notification-anchor">
-              <div className="profile-chip">
-                <strong>
-                  {profile.display_name} - {formatGenderShort(profile.gender)}
-                </strong>
-                <span>
-                  {profile.username} - {formatRoleLabel(profile.role)}
-                </span>
-                <button
-                  className="notification-bell"
-                  type="button"
-                  onClick={() => setNotificationsOpen((current) => !current)}
-                  aria-label="Notifications"
-                >
-                  <svg
-                    className="notification-bell-icon"
-                    viewBox="0 0 24 24"
-                    aria-hidden="true"
-                  >
-                    <path
-                      d="M12 3.5a4 4 0 0 0-4 4v1.2c0 .9-.3 1.8-.8 2.5L5.7 13a1.2 1.2 0 0 0 .9 2h10.8a1.2 1.2 0 0 0 .9-2l-1.5-1.8a4.3 4.3 0 0 1-.8-2.5V7.5a4 4 0 0 0-4-4Z"
-                      fill="none"
-                      stroke="currentColor"
-                      strokeWidth="1.8"
-                      strokeLinecap="round"
-                      strokeLinejoin="round"
-                    />
-                    <path
-                      d="M9.8 18a2.4 2.4 0 0 0 4.4 0"
-                      fill="none"
-                      stroke="currentColor"
-                      strokeWidth="1.8"
-                      strokeLinecap="round"
-                      strokeLinejoin="round"
-                    />
-                  </svg>
-                  {unreadCount ? <span className="notification-badge">{unreadCount}</span> : null}
-                </button>
-              </div>
-              {notificationsOpen ? (
-                <div className="notification-popover">
-                  <div className="notification-popover-header">
-                    <div>
-                      <p className="eyebrow">Notifications</p>
-                    </div>
-                    <button
-                      className="tiny-button"
-                      type="button"
-                      onClick={() => setNotificationsOpen(false)}
-                    >
-                      Close
-                    </button>
+          <div className="notification-anchor">
+            <button
+              className="secondary-button"
+              type="button"
+              onClick={() => setNotificationsOpen((current) => !current)}
+            >
+              Notifications
+              {counts.total ? <span className="tab-badge">{counts.total}</span> : null}
+            </button>
+            {notificationsOpen ? (
+              <div className="notification-popover">
+                <div className="notification-popover-header">
+                  <div>
+                    <p className="eyebrow">Universal</p>
+                    <strong>{counts.total} unread</strong>
                   </div>
-                  <div className="notification-list">
-                    {unreadNotifications.length ? (
-                      unreadNotifications.map((notification) => (
-                        <div key={notification.id} className="notification-item">
-                          <div>
-                            <strong>{notification.title}</strong>
-                            <p>{notification.body}</p>
-                          </div>
+                </div>
+                <div className="notification-list">
+                  {notifications.length ? (
+                    notifications.slice(0, 12).map((notification) => (
+                      <div className="notification-item" key={notification.id}>
+                        <div>
+                          <strong>{notification.title}</strong>
+                          <p className="muted-text">{notification.body}</p>
+                        </div>
+                        {!notification.read_at ? (
                           <button
                             className="tiny-button"
                             type="button"
-                            disabled={busyAction === `notification-${notification.id}`}
                             onClick={() =>
                               runAction(
-                                `notification-${notification.id}`,
+                                `read-${notification.id}`,
                                 () => markNotificationRead(notification.id),
-                                'Notification archived.',
+                                'Notification marked read.',
                               )
                             }
                           >
-                            Mark read
+                            Read
                           </button>
-                        </div>
-                      ))
-                    ) : (
-                      <p className="muted-text">No unread notifications right now.</p>
-                    )}
-                  </div>
-                  <button
-                    className="section-toggle"
-                    type="button"
-                    onClick={() => setArchivedNotificationsOpen((current) => !current)}
-                  >
-                    <span>
-                      <span className="eyebrow">Archived</span>
-                    </span>
-                    <span className="count-pill">
-                      {archivedNotifications.length} {archivedNotificationsOpen ? 'Hide' : 'Show'}
-                    </span>
-                  </button>
-                  {archivedNotificationsOpen ? (
-                    <div className="notification-list">
-                      {archivedNotifications.length ? (
-                        archivedNotifications.map((notification) => (
-                          <div key={notification.id} className="notification-item">
-                            <div>
-                              <strong>{notification.title}</strong>
-                              <p>{notification.body}</p>
-                            </div>
-                            <span className="status-pill">Archived</span>
-                          </div>
-                        ))
-                      ) : (
-                        <p className="muted-text">No archived notifications yet.</p>
-                      )}
-                    </div>
-                  ) : null}
+                        ) : null}
+                      </div>
+                    ))
+                  ) : (
+                    <p className="muted-text">No notifications yet.</p>
+                  )}
                 </div>
-              ) : null}
-            </div>
+              </div>
+            ) : null}
           </div>
-          <button className="secondary-button" onClick={handleSignOut} type="button">
-            Sign out
+          <button className="secondary-button" type="button" onClick={handleSignOut}>
+            Log out
           </button>
         </div>
-      </section>
+      </header>
 
-      <nav className="tab-nav">
+      <nav className="tab-nav" aria-label="Main sections">
         {navItems.map((item) => (
           <button
             key={item.id}
-            className={`tab-button${activeTab === item.id ? ' tab-button-active' : ''}`}
-            onClick={() => setActiveTab(item.id)}
+            className={`tab-button ${activeTab === item.id ? 'tab-button-active' : ''}`}
             type="button"
+            onClick={() => setActiveTab(item.id)}
           >
-            <span>{item.label}</span>
-            {item.badge ? <span className="tab-badge">{item.badge}</span> : null}
+            {item.label}
+            {item.count ? <span className="tab-badge">{item.count}</span> : null}
           </button>
         ))}
       </nav>
@@ -736,304 +581,691 @@ export default function Dashboard() {
       {errorMessage ? <p className="flash flash-error">{errorMessage}</p> : null}
       {successMessage ? <p className="flash flash-success">{successMessage}</p> : null}
 
-      {activeTab === 'home' ? (
-        <HomeTab
-          profile={profile}
-          myEntries={myEntries}
-          adminPromotionPassword={adminPromotionPassword}
-          setAdminPromotionPassword={setAdminPromotionPassword}
-          busyAction={busyAction}
-          handleAdminPromotion={handleAdminPromotion}
-        />
-      ) : null}
-
-      {activeTab === 'leaderboards' ? (
-        <>
-          <section className="panel active-ladders-bar">
-            <div className="active-ladders-bar-header">
-              <p className="eyebrow">Your Active Ladders</p>
-              <h2>{myEntries.length} of 2</h2>
-            </div>
-            <div className="active-ladders-bar-list">
-              {myEntries.length ? (
-                myEntries.map((entry) => (
-                  <div key={entry.entry_id} className="active-ladders-chip">
-                    <div>
-                      <strong>{entry.ladder_name}</strong>
-                      <span>Rank #{entry.rank_position}</span>
-                    </div>
-                    <button
-                      className="tiny-button tiny-button-danger"
-                      type="button"
-                      disabled={busyAction === `self-drop-${entry.entry_id}`}
-                      onClick={() => setDropConfirmEntry(entry)}
-                    >
-                      Drop spot
-                    </button>
-                  </div>
-                ))
-              ) : (
-                <p className="muted-text">No active ladder spots yet.</p>
-              )}
-            </div>
-          </section>
+      {activeTab === 'club' ? (
+        <section className="tab-panel">
+          <NotificationList
+            category="club"
+            notifications={notifications}
+            open={categoryNotificationsOpen.club}
+            onToggle={() =>
+              setCategoryNotificationsOpen((current) => ({ ...current, club: !current.club }))
+            }
+            onRead={(id) => runAction(`read-${id}`, () => markNotificationRead(id), 'Notification marked read.')}
+            onReadCategory={(category) =>
+              runAction(`read-${category}`, () => markCategoryNotificationsRead(category), 'Notifications marked read.')
+            }
+          />
 
           <section className="content-grid">
             <div className="panel panel-wide">
               <div className="section-heading">
                 <div>
-                  <p className="eyebrow">Leaderboard View</p>
+                  <p className="eyebrow">Clubs</p>
+                  <h2>Create, join, and choose your active club</h2>
                 </div>
               </div>
-              <div className="ladder-board-stack">
-                {ladders.map((ladder) => (
-                  <LadderTable
-                    key={ladder.id}
-                    ladder={ladder}
-                    entries={getEntriesForLadder(ladder.id)}
-                    isAdmin={false}
-                    currentUserId={profile.id}
-                    busyAction={busyAction}
-                    onMove={() => {}}
-                    onRemove={() => {}}
-                    expandedSelfDropEntryId={expandedSelfDropEntryId}
-                    onToggleSelfDrop={(entryId) =>
-                      setExpandedSelfDropEntryId((current) =>
-                        current === entryId ? null : entryId,
-                      )
-                    }
-                    onConfirmSelfDrop={handleInlineSelfDrop}
-                  />
-                ))}
-              </div>
-            </div>
 
-            <aside className="sidebar-stack">
-              <section className="panel leaderboard-request-panel">
-                <p className="eyebrow">Join or Challenge</p>
-                <form className="form-stack compact-form" onSubmit={handleRequestSubmit}>
+              <div className="form-grid club-action-grid">
+                <form className="form-stack panel-subtle" onSubmit={handleCreateClub}>
+                  <p className="eyebrow">Create club</p>
                   <label>
-                    <span>Ladder</span>
-                    <select
-                      value={requestForm.ladderCode}
+                    <span>Club name</span>
+                    <input
+                      value={createClubForm.name}
                       onChange={(event) =>
-                        setRequestForm((current) => ({
-                          ...current,
-                          ladderCode: event.target.value,
-                          partnerUsername: '',
-                          dropLadderCode: '',
-                          targetRank: '',
-                        }))
+                        setCreateClubForm((current) => ({ ...current, name: event.target.value }))
                       }
+                      placeholder="OSU Tennis"
+                      required
+                    />
+                  </label>
+                  <label>
+                    <span>Club password</span>
+                    <input
+                      type="password"
+                      value={createClubForm.password}
+                      onChange={(event) =>
+                        setCreateClubForm((current) => ({ ...current, password: event.target.value }))
+                      }
+                      placeholder="Simple join password"
+                      required
+                    />
+                  </label>
+                  <button className="primary-button" type="submit" disabled={busyAction === 'create-club'}>
+                    {busyAction === 'create-club' ? 'Creating...' : 'Create club'}
+                  </button>
+                </form>
+
+                <form className="form-stack panel-subtle" onSubmit={handleJoinClub}>
+                  <p className="eyebrow">Join club</p>
+                  <label>
+                    <span>Unique club name</span>
+                    <input
+                      value={joinClubForm.name}
+                      onChange={(event) =>
+                        setJoinClubForm((current) => ({ ...current, name: event.target.value }))
+                      }
+                      placeholder="Exact club name"
+                      required
+                    />
+                  </label>
+                  <label>
+                    <span>Club password</span>
+                    <input
+                      type="password"
+                      value={joinClubForm.password}
+                      onChange={(event) =>
+                        setJoinClubForm((current) => ({ ...current, password: event.target.value }))
+                      }
+                      placeholder="Join password"
+                      required
+                    />
+                  </label>
+                  <button className="primary-button" type="submit" disabled={busyAction === 'join-club'}>
+                    {busyAction === 'join-club' ? 'Joining...' : 'Join club'}
+                  </button>
+                </form>
+              </div>
+
+              {clubs.length ? (
+                <>
+                  <div className="section-heading section-spaced">
+                    <div>
+                      <p className="eyebrow">Active club</p>
+                      <h2>{selectedClub?.name}</h2>
+                    </div>
+                    <select
+                      className="compact-select"
+                      value={activeClubId}
+                      onChange={(event) => setSelectedClubId(event.target.value)}
                     >
-                      {(requestForm.requestType === 'challenge' ? challengeableLadders : ladders).map((ladder) => (
-                        <option
-                          key={ladder.id}
-                          value={ladder.code}
-                          disabled={
-                            requestForm.requestType === 'join' &&
-                            !isEligibleForLadder(profile.gender, ladder.code)
-                          }
-                        >
-                          {ladder.name}
+                      {clubs.map((club) => (
+                        <option key={club.id} value={club.id}>
+                          {club.name} ({formatRole(club.role)})
                         </option>
                       ))}
                     </select>
-                  </label>
+                  </div>
 
-                  <label>
-                    <span>Request type</span>
-                    <select
-                      value={requestForm.requestType}
-                      onChange={(event) =>
-                        setRequestForm((current) => {
-                          const nextRequestType = event.target.value
+                  <section className="info-grid">
+                    <article className="panel-subtle">
+                      <p className="eyebrow">Members</p>
+                      <h2>{selectedMembers.length}</h2>
+                    </article>
+                    <article className="panel-subtle">
+                      <p className="eyebrow">Your role</p>
+                      <h2>{formatRole(selectedRole)}</h2>
+                    </article>
+                    <article className="panel-subtle">
+                      <p className="eyebrow">Your spots</p>
+                      <h2>{myEntries.length}</h2>
+                    </article>
+                  </section>
 
-                          return {
-                            ...current,
-                            requestType: nextRequestType,
-                            ladderCode:
-                              nextRequestType === 'challenge' && challengeableLadders.length
-                                ? challengeableLadders[0].code
-                                : current.ladderCode,
-                            targetRank: '',
-                            partnerUsername: '',
-                            dropLadderCode: '',
-                          }
-                        })
-                      }
-                    >
-                      <option value="join">Join ladder</option>
-                      <option value="challenge">Challenge</option>
-                    </select>
-                  </label>
+                  <section className="panel-subtle">
+                    <div className="section-heading">
+                      <div>
+                        <p className="eyebrow">Roster</p>
+                        <h2>Members and roles</h2>
+                      </div>
+                    </div>
+                    <div className="request-list">
+                      {selectedMembers.map((member) => (
+                        <div className="request-review" key={member.membership_id}>
+                          <div>
+                            <strong>{member.full_name}</strong>
+                            <p className="muted-text">
+                              @{member.username} | {formatSex(member.sex)} | {formatAgeGroup(member.age_group)} | {formatRole(member.role)}
+                            </p>
+                          </div>
+                          {isClubPresident && member.user_id !== profile.id ? (
+                            <div className="inline-actions">
+                              {member.role !== 'member' ? (
+                                <button
+                                  className="tiny-button"
+                                  type="button"
+                                  onClick={() =>
+                                    runAction(
+                                      `demote-${member.user_id}`,
+                                      () =>
+                                        setClubMemberRole({
+                                          clubId: activeClubId,
+                                          memberId: member.user_id,
+                                          role: 'member',
+                                        }),
+                                      'Member demoted.',
+                                    )
+                                  }
+                                >
+                                  Make member
+                                </button>
+                              ) : (
+                                <button
+                                  className="tiny-button"
+                                  type="button"
+                                  onClick={() =>
+                                    runAction(
+                                      `promote-${member.user_id}`,
+                                      () =>
+                                        setClubMemberRole({
+                                          clubId: activeClubId,
+                                          memberId: member.user_id,
+                                          role: 'officer',
+                                        }),
+                                      'Member promoted.',
+                                    )
+                                  }
+                                >
+                                  Make officer
+                                </button>
+                              )}
+                              <button
+                                className="tiny-button tiny-button-danger"
+                                type="button"
+                                onClick={() =>
+                                  runAction(
+                                    `transfer-${member.user_id}`,
+                                    () =>
+                                      transferClubPresidency({
+                                        clubId: activeClubId,
+                                        newPresidentId: member.user_id,
+                                      }),
+                                    'Presidency transferred.',
+                                  )
+                                }
+                              >
+                                Transfer president
+                              </button>
+                            </div>
+                          ) : null}
+                        </div>
+                      ))}
+                    </div>
+                  </section>
+                </>
+              ) : (
+                <p className="muted-text section-spaced">Create or join a club to unlock club ladders.</p>
+              )}
+            </div>
 
-                  {requestForm.requestType === 'challenge' ? (
-                    <label>
-                      <span>Challenge player or team</span>
-                      <select
-                        value={requestForm.targetRank}
-                        onChange={(event) =>
-                          setRequestForm((current) => ({
-                            ...current,
-                            targetRank: event.target.value,
-                          }))
-                        }
-                        required
-                      >
-                        <option value="">Choose who to challenge</option>
-                        {challengeOptions.map((entry) => (
-                          <option key={entry.entry_id} value={entry.rank_position}>
-                            #{entry.rank_position} {entry.team_label}
-                          </option>
-                        ))}
-                      </select>
-                    </label>
-                  ) : null}
-
-                  {requestForm.requestType === 'join' && DOUBLES_LADDERS.includes(requestForm.ladderCode) ? (
-                    <label>
-                      <span>Invite a friend</span>
-                      <select
-                        value={requestForm.partnerUsername}
-                        onChange={(event) =>
-                          setRequestForm((current) => ({
-                            ...current,
-                            partnerUsername: event.target.value,
-                          }))
-                        }
-                        required
-                      >
-                        <option value="">Choose an eligible friend</option>
-                        {eligibleFriendOptions.map((friend) => (
-                          <option key={friend.friend_id} value={friend.friend_username}>
-                            {friend.friend_display_name} (@{friend.friend_username})
-                          </option>
-                        ))}
-                      </select>
-                    </label>
-                  ) : null}
-
-                  {needsDropChoice ? (
-                    <label>
-                      <span>Choose the ladder to drop if this gets approved</span>
-                      <select
-                        value={requestForm.dropLadderCode}
-                        onChange={(event) =>
-                          setRequestForm((current) => ({
-                            ...current,
-                            dropLadderCode: event.target.value,
-                          }))
-                        }
-                        required
-                      >
-                        <option value="">Select a ladder to drop</option>
-                        {getDropOptionsForUser(profile.id).map((option) => (
-                          <option key={option.ladderCode} value={option.ladderCode}>
-                            {option.label}
-                          </option>
-                        ))}
-                      </select>
-                    </label>
-                  ) : null}
-
-                  <label>
-                    <span>Message for officers</span>
-                    <textarea
-                      rows="3"
-                      value={requestForm.message}
-                      onChange={(event) =>
-                        setRequestForm((current) => ({
-                          ...current,
-                          message: event.target.value,
-                        }))
-                      }
-                      placeholder="Optional context"
-                    />
-                  </label>
-
-                  {requestForm.requestType === 'join' && !joinAllowed ? (
-                    <p className="form-error">You are not eligible to join this ladder right now.</p>
-                  ) : null}
-                  {requestForm.requestType === 'challenge' && !challengeAllowed ? (
-                    <p className="form-error">You need to already be ranked on this ladder before challenging.</p>
-                  ) : null}
-                  {requestForm.requestType === 'challenge' && challengeAllowed && !challengeOptions.length ? (
-                    <p className="form-error">There is nobody eligible to challenge from this ladder right now.</p>
-                  ) : null}
-
-                  <button
-                    className="primary-button"
-                    type="submit"
-                    disabled={
-                      busyAction === 'request' ||
-                      (requestForm.requestType === 'join'
-                        ? !joinAllowed
-                        : !challengeAllowed || !requestForm.targetRank)
-                    }
-                  >
-                    {busyAction === 'request' ? 'Sending...' : 'Send request'}
-                  </button>
-                </form>
+            <aside className="sidebar-stack">
+              <section className="panel">
+                <p className="eyebrow">Ladder Guide</p>
+                <h2>Club-scoped rankings</h2>
+                <p className="muted-text">{LADDER_RULE_COPY[profile.sex]?.summary}</p>
               </section>
             </aside>
           </section>
-        </>
+
+          {activeClubId ? (
+            <section className="content-grid section-spaced">
+              <div className="panel panel-wide">
+                <div className="section-heading">
+                  <div>
+                    <p className="eyebrow">Club ladders</p>
+                    <h2>Leaderboards</h2>
+                  </div>
+                </div>
+                <div className="ladder-board-stack">
+                  {(snapshot?.ladders ?? []).map((ladder) => (
+                    <LadderTable
+                      key={ladder.id}
+                      ladder={ladder}
+                      entries={selectedEntries
+                        .filter((entry) => entry.ladder_id === ladder.id)
+                        .sort((left, right) => left.rank_position - right.rank_position)}
+                      isAdmin={isClubOfficer}
+                      currentUserId={profile.id}
+                      busyAction={busyAction}
+                      expandedSelfDropEntryId={expandedSelfDropEntryId}
+                      onToggleSelfDrop={(entryId) =>
+                        setExpandedSelfDropEntryId((current) => (current === entryId ? null : entryId))
+                      }
+                      onConfirmSelfDrop={(entry) =>
+                        runAction(
+                          `self-drop-${entry.entry_id}`,
+                          () => memberDropOwnLadderEntry(entry.entry_id),
+                          'Ladder spot dropped.',
+                        )
+                      }
+                      onMove={(entryId, newRank) =>
+                        runAction(
+                          `move-${entryId}`,
+                          () => officerMoveLadderEntry(entryId, newRank),
+                          'Ladder position updated.',
+                        )
+                      }
+                      onRemove={(entryId) =>
+                        runAction(
+                          `remove-${entryId}`,
+                          () => officerRemoveLadderEntry(entryId),
+                          'Ladder entry removed.',
+                        )
+                      }
+                    />
+                  ))}
+                </div>
+              </div>
+
+              <aside className="sidebar-stack">
+                <section className="panel">
+                  <p className="eyebrow">Request ladder access</p>
+                  <form className="form-stack compact-form" onSubmit={handleLadderSubmit}>
+                    <label>
+                      <span>Ladder</span>
+                      <select
+                        value={ladderForm.ladderCode}
+                        onChange={(event) =>
+                          setLadderForm((current) => ({
+                            ...current,
+                            ladderCode: event.target.value,
+                            targetRank: '',
+                            partnerUsername: '',
+                          }))
+                        }
+                      >
+                        {(snapshot?.ladders ?? []).map((ladder) => (
+                          <option key={ladder.id} value={ladder.code}>
+                            {ladder.name}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+                    <label>
+                      <span>Request type</span>
+                      <select
+                        value={ladderForm.requestType}
+                        onChange={(event) =>
+                          setLadderForm((current) => ({
+                            ...current,
+                            requestType: event.target.value,
+                            targetRank: '',
+                          }))
+                        }
+                      >
+                        <option value="join">Join ladder</option>
+                        <option value="challenge">Challenge rank</option>
+                      </select>
+                    </label>
+                    {ladderForm.requestType === 'challenge' ? (
+                      <label>
+                        <span>Target rank</span>
+                        <select
+                          value={ladderForm.targetRank}
+                          onChange={(event) =>
+                            setLadderForm((current) => ({ ...current, targetRank: event.target.value }))
+                          }
+                          required
+                        >
+                          <option value="">Choose rank</option>
+                          {challengeOptions.map((entry) => (
+                            <option key={entry.entry_id} value={entry.rank_position}>
+                              #{entry.rank_position} {entry.team_label}
+                            </option>
+                          ))}
+                        </select>
+                      </label>
+                    ) : null}
+                    {ladderForm.requestType === 'join' && DOUBLES_LADDERS.includes(ladderForm.ladderCode) ? (
+                      <label>
+                        <span>Doubles friend</span>
+                        <select
+                          value={ladderForm.partnerUsername}
+                          onChange={(event) =>
+                            setLadderForm((current) => ({
+                              ...current,
+                              partnerUsername: event.target.value,
+                            }))
+                          }
+                          required
+                        >
+                          <option value="">Choose friend</option>
+                          {(snapshot?.friends ?? []).map((friend) => (
+                            <option key={friend.friend_id} value={friend.friend_username}>
+                              {friend.friend_full_name} (@{friend.friend_username})
+                            </option>
+                          ))}
+                        </select>
+                      </label>
+                    ) : null}
+                    {ladderForm.requestType === 'join' && myEntries.length >= 2 ? (
+                      <label>
+                        <span>Drop if approved</span>
+                        <select
+                          value={ladderForm.dropLadderCode}
+                          onChange={(event) =>
+                            setLadderForm((current) => ({
+                              ...current,
+                              dropLadderCode: event.target.value,
+                            }))
+                          }
+                          required
+                        >
+                          <option value="">Choose active ladder</option>
+                          {myEntries.map((entry) => (
+                            <option key={entry.entry_id} value={entry.ladder_code}>
+                              {entry.ladder_name}
+                            </option>
+                          ))}
+                        </select>
+                      </label>
+                    ) : null}
+                    <label>
+                      <span>Message</span>
+                      <textarea
+                        value={ladderForm.message}
+                        onChange={(event) =>
+                          setLadderForm((current) => ({ ...current, message: event.target.value }))
+                        }
+                        rows={3}
+                        placeholder="Optional note"
+                      />
+                    </label>
+                    <button
+                      className="primary-button"
+                      type="submit"
+                      disabled={busyAction === 'ladder-request' || !selectedLadder}
+                    >
+                      {busyAction === 'ladder-request' ? 'Sending...' : 'Submit request'}
+                    </button>
+                  </form>
+                </section>
+
+                <section className="panel">
+                  <p className="eyebrow">Doubles invites</p>
+                  <div className="request-list">
+                    {pendingPartnerInvites.length ? (
+                      pendingPartnerInvites.map((request) => {
+                        const needsDrop = myEntries.length >= 2
+                        return (
+                          <div className="request-review" key={request.request_id}>
+                            <div>
+                              <strong>{request.requester_name}</strong>
+                              <p className="muted-text">{request.ladder_name}</p>
+                              {needsDrop ? (
+                                <select
+                                  className="compact-select"
+                                  value={partnerDropChoices[request.request_id] || ''}
+                                  onChange={(event) =>
+                                    setPartnerDropChoices((current) => ({
+                                      ...current,
+                                      [request.request_id]: event.target.value,
+                                    }))
+                                  }
+                                >
+                                  <option value="">Choose drop ladder</option>
+                                  {myEntries.map((entry) => (
+                                    <option key={entry.entry_id} value={entry.ladder_code}>
+                                      {entry.ladder_name}
+                                    </option>
+                                  ))}
+                                </select>
+                              ) : null}
+                            </div>
+                            <div className="inline-actions">
+                              <button
+                                className="tiny-button"
+                                type="button"
+                                disabled={needsDrop && !partnerDropChoices[request.request_id]}
+                                onClick={() =>
+                                  runAction(
+                                    `partner-accept-${request.request_id}`,
+                                    () =>
+                                      respondToPartnerLadderInvite({
+                                        requestId: request.request_id,
+                                        accept: true,
+                                        dropLadderCode: partnerDropChoices[request.request_id] || null,
+                                      }),
+                                    'Doubles invite accepted.',
+                                  )
+                                }
+                              >
+                                Accept
+                              </button>
+                              <button
+                                className="tiny-button tiny-button-danger"
+                                type="button"
+                                onClick={() =>
+                                  runAction(
+                                    `partner-reject-${request.request_id}`,
+                                    () =>
+                                      respondToPartnerLadderInvite({
+                                        requestId: request.request_id,
+                                        accept: false,
+                                        dropLadderCode: null,
+                                      }),
+                                    'Doubles invite declined.',
+                                  )
+                                }
+                              >
+                                Decline
+                              </button>
+                            </div>
+                          </div>
+                        )
+                      })
+                    ) : (
+                      <p className="muted-text">No doubles invites waiting.</p>
+                    )}
+                  </div>
+                </section>
+
+                {isClubOfficer ? (
+                  <>
+                    <section className="panel">
+                      <p className="eyebrow">Officer add</p>
+                      <form className="form-stack compact-form" onSubmit={handleAdminAdd}>
+                        <label>
+                          <span>Ladder</span>
+                          <select
+                            value={adminForm.ladderCode}
+                            onChange={(event) =>
+                              setAdminForm((current) => ({
+                                ...current,
+                                ladderCode: event.target.value,
+                                partnerUserId: '',
+                              }))
+                            }
+                          >
+                            {(snapshot?.ladders ?? []).map((ladder) => (
+                              <option key={ladder.id} value={ladder.code}>
+                                {ladder.name}
+                              </option>
+                            ))}
+                          </select>
+                        </label>
+                        <label>
+                          <span>Player</span>
+                          <select
+                            value={adminForm.userId}
+                            onChange={(event) =>
+                              setAdminForm((current) => ({ ...current, userId: event.target.value }))
+                            }
+                            required
+                          >
+                            <option value="">Choose member</option>
+                            {selectedMembers.map((member) => (
+                              <option key={member.user_id} value={member.user_id}>
+                                {member.full_name} (@{member.username})
+                              </option>
+                            ))}
+                          </select>
+                        </label>
+                        {DOUBLES_LADDERS.includes(adminForm.ladderCode) ? (
+                          <label>
+                            <span>Partner</span>
+                            <select
+                              value={adminForm.partnerUserId}
+                              onChange={(event) =>
+                                setAdminForm((current) => ({
+                                  ...current,
+                                  partnerUserId: event.target.value,
+                                }))
+                              }
+                              required
+                            >
+                              <option value="">Choose partner</option>
+                              {selectedMembers.map((member) => (
+                                <option key={member.user_id} value={member.user_id}>
+                                  {member.full_name} (@{member.username})
+                                </option>
+                              ))}
+                            </select>
+                          </label>
+                        ) : null}
+                        <label>
+                          <span>Rank</span>
+                          <input
+                            type="number"
+                            min="1"
+                            value={adminForm.rank}
+                            onChange={(event) =>
+                              setAdminForm((current) => ({ ...current, rank: event.target.value }))
+                            }
+                            placeholder="Bottom if blank"
+                          />
+                        </label>
+                        <button className="primary-button" type="submit" disabled={busyAction === 'admin-add-entry'}>
+                          {busyAction === 'admin-add-entry' ? 'Adding...' : 'Add entry'}
+                        </button>
+                      </form>
+                    </section>
+
+                    <section className="panel">
+                      <p className="eyebrow">Officer queue</p>
+                      <div className="request-list">
+                        {pendingOfficerRequests.length ? (
+                          pendingOfficerRequests.map((request) => (
+                            <div className="request-review" key={request.request_id}>
+                              <div>
+                                <strong>{request.requester_name}</strong>
+                                <p className="muted-text">
+                                  {request.ladder_name} | {request.request_type}
+                                  {request.partner_name ? ` | ${request.partner_name}` : ''}
+                                </p>
+                                {request.target_rank ? <p>Target rank #{request.target_rank}</p> : null}
+                                <input
+                                  className="compact-input"
+                                  type="number"
+                                  min="1"
+                                  value={rankOverrides[request.request_id] || ''}
+                                  onChange={(event) =>
+                                    setRankOverrides((current) => ({
+                                      ...current,
+                                      [request.request_id]: event.target.value,
+                                    }))
+                                  }
+                                  placeholder="Optional rank"
+                                />
+                              </div>
+                              <div className="inline-actions">
+                                <button
+                                  className="tiny-button"
+                                  type="button"
+                                  onClick={() =>
+                                    runAction(
+                                      `approve-${request.request_id}`,
+                                      () =>
+                                        officerResolveLadderRequest({
+                                          requestId: request.request_id,
+                                          decision: 'approved',
+                                          rank: rankOverrides[request.request_id]
+                                            ? Number(rankOverrides[request.request_id])
+                                            : null,
+                                        }),
+                                      'Ladder request approved.',
+                                    )
+                                  }
+                                >
+                                  Approve
+                                </button>
+                                <button
+                                  className="tiny-button tiny-button-danger"
+                                  type="button"
+                                  onClick={() =>
+                                    runAction(
+                                      `reject-${request.request_id}`,
+                                      () =>
+                                        officerResolveLadderRequest({
+                                          requestId: request.request_id,
+                                          decision: 'rejected',
+                                          rank: null,
+                                        }),
+                                      'Ladder request rejected.',
+                                    )
+                                  }
+                                >
+                                  Reject
+                                </button>
+                              </div>
+                            </div>
+                          ))
+                        ) : (
+                          <p className="muted-text">No officer-ready ladder requests.</p>
+                        )}
+                      </div>
+                    </section>
+                  </>
+                ) : null}
+              </aside>
+            </section>
+          ) : null}
+        </section>
       ) : null}
 
-      {activeTab === 'friends' ? (
-        <>
-          <section className="friends-grid">
-            <article className="panel panel-subtle">
-              <p className="eyebrow">Friends List</p>
-              <div className="request-list">
-                {friends.length ? (
-                  friends.map((friend) => (
-                    <div key={friend.friend_id} className="request-item">
-                      <div>
-                        <strong>{friend.friend_display_name}</strong>
-                        <p>
-                          @{friend.friend_username} | {friend.friend_gender}
-                        </p>
-                      </div>
-                    </div>
-                  ))
-                ) : (
-                  <p className="muted-text">No confirmed friends yet.</p>
-                )}
-              </div>
-            </article>
+      {activeTab === 'social' ? (
+        <section className="tab-panel">
+          <NotificationList
+            category="social"
+            notifications={notifications}
+            open={categoryNotificationsOpen.social}
+            onToggle={() =>
+              setCategoryNotificationsOpen((current) => ({ ...current, social: !current.social }))
+            }
+            onRead={(id) => runAction(`read-${id}`, () => markNotificationRead(id), 'Notification marked read.')}
+            onReadCategory={(category) =>
+              runAction(`read-${category}`, () => markCategoryNotificationsRead(category), 'Notifications marked read.')
+            }
+          />
 
-            <article className="panel panel-subtle">
-              <p className="eyebrow">Add Friend</p>
-              <form className="form-stack compact-form" onSubmit={handleFriendSearch}>
-                <label>
-                  <input
-                    type="text"
-                    value={friendSearch}
-                    onChange={(event) => setFriendSearch(event.target.value)}
-                    placeholder="Search by username"
-                    required
-                  />
-                </label>
+          <section className="content-grid section-spaced">
+            <div className="panel panel-wide">
+              <div className="section-heading">
+                <div>
+                  <p className="eyebrow">Exact username search</p>
+                  <h2>Find players</h2>
+                </div>
+              </div>
+              <form className="inline-form" onSubmit={handleFriendSearch}>
+                <input
+                  value={friendSearch}
+                  onChange={(event) =>
+                    setFriendSearch(event.target.value.toLowerCase().replace(/[^a-z0-9_]/g, ''))
+                  }
+                  placeholder="exact_username"
+                  minLength={3}
+                  maxLength={24}
+                  required
+                />
                 <button className="primary-button" type="submit" disabled={busyAction === 'friend-search'}>
                   {busyAction === 'friend-search' ? 'Searching...' : 'Search'}
                 </button>
               </form>
-              <div className="request-list">
+
+              <div className="request-list section-spaced">
                 {searchResults.length ? (
                   searchResults.map((result) => (
-                    <div key={result.id} className="request-item">
+                    <div className="request-review" key={result.id}>
                       <div>
-                        <strong>{result.display_name}</strong>
-                        <p>
-                          @{result.username} | {result.gender}
+                        <strong>{result.full_name}</strong>
+                        <p className="muted-text">
+                          @{result.username} | {formatSex(result.sex)} | {formatAgeGroup(result.age_group)}
                         </p>
                       </div>
                       <button
                         className="tiny-button"
                         type="button"
-                        disabled={busyAction === `friend-${result.username}`}
+                        disabled={result.is_friend || result.has_pending_request}
                         onClick={() =>
                           runAction(
                             `friend-${result.username}`,
@@ -1042,130 +1274,36 @@ export default function Dashboard() {
                           )
                         }
                       >
-                        Add friend
+                        {result.is_friend ? 'Friend' : result.has_pending_request ? 'Pending' : 'Add friend'}
                       </button>
                     </div>
                   ))
                 ) : (
-                  null
+                  <p className="muted-text">Search an exact username to see a profile.</p>
                 )}
               </div>
-            </article>
+            </div>
 
-            <article className="panel">
-              <p className="eyebrow">Friends</p>
-              <h2>{friends.length}</h2>
-            </article>
-            <article className="panel">
-              <p className="eyebrow">Pending</p>
-              <h2>{pendingSocialCount}</h2>
-            </article>
-
-            <article className="panel panel-subtle">
-              <p className="eyebrow">Friend Requests</p>
-              <div className="request-list">
-                {incomingFriendRequests.length ? (
-                  incomingFriendRequests.map((request) => (
-                    <div key={request.request_id} className="request-review">
-                      <div>
-                        <strong>{request.sender_name}</strong>
-                        <p>@{request.sender_username}</p>
-                      </div>
-                      <div className="inline-actions">
-                        <button
-                          className="tiny-button"
-                          type="button"
-                          disabled={busyAction === `friend-accept-${request.request_id}`}
-                          onClick={() =>
-                            runAction(
-                              `friend-accept-${request.request_id}`,
-                              () => respondToFriendRequest(request.request_id, true),
-                              'Friend request accepted.',
-                            )
-                          }
-                        >
-                          Accept
-                        </button>
-                        <button
-                          className="tiny-button tiny-button-danger"
-                          type="button"
-                          disabled={busyAction === `friend-decline-${request.request_id}`}
-                          onClick={() =>
-                            runAction(
-                              `friend-decline-${request.request_id}`,
-                              () => respondToFriendRequest(request.request_id, false),
-                              'Friend request declined.',
-                            )
-                          }
-                        >
-                          Decline
-                        </button>
-                      </div>
-                    </div>
-                  ))
-                ) : (
-                  <p className="muted-text">No incoming friend requests.</p>
-                )}
-              </div>
-            </article>
-
-            <article className="panel panel-subtle">
-              <p className="eyebrow">Doubles Invites</p>
-              <div className="request-list">
-                {partnerInvites.length ? (
-                  partnerInvites.map((request) => {
-                    const dropOptions = getDropOptionsForUser(profile.id)
-                    const needsInviteDropChoice = dropOptions.length >= 2
-
-                    return (
-                      <div key={request.request_id} className="request-review">
+            <aside className="sidebar-stack">
+              <section className="panel">
+                <p className="eyebrow">Friend requests</p>
+                <div className="request-list">
+                  {incomingFriendRequests.length ? (
+                    incomingFriendRequests.map((request) => (
+                      <div className="request-review" key={request.request_id}>
                         <div>
-                          <strong>{request.requester_name}</strong>
-                          <p>
-                            {request.ladder_name} | @{request.requester_username}
-                          </p>
-                          <p className="muted-text">
-                            Accepting sends the request to officers and notifies your partner.
-                          </p>
-                          {needsInviteDropChoice ? (
-                            <div className="inline-field">
-                              <select
-                                value={inviteDropChoices[request.request_id] || ''}
-                                onChange={(event) =>
-                                  setInviteDropChoices((current) => ({
-                                    ...current,
-                                    [request.request_id]: event.target.value,
-                                  }))
-                                }
-                              >
-                                <option value="">Choose the ladder to drop if approved</option>
-                                {dropOptions.map((option) => (
-                                  <option key={option.ladderCode} value={option.ladderCode}>
-                                    {option.label}
-                                  </option>
-                                ))}
-                              </select>
-                            </div>
-                          ) : null}
+                          <strong>{request.sender_full_name}</strong>
+                          <p className="muted-text">@{request.sender_username}</p>
                         </div>
                         <div className="inline-actions">
                           <button
                             className="tiny-button"
                             type="button"
-                            disabled={
-                              busyAction === `invite-accept-${request.request_id}` ||
-                              (needsInviteDropChoice && !inviteDropChoices[request.request_id])
-                            }
                             onClick={() =>
                               runAction(
-                                `invite-accept-${request.request_id}`,
-                                () =>
-                                  respondToPartnerInvite(
-                                    request.request_id,
-                                    true,
-                                    inviteDropChoices[request.request_id] || null,
-                                  ),
-                                'Invite accepted and sent to officers.',
+                                `friend-accept-${request.request_id}`,
+                                () => respondToFriendRequest(request.request_id, true),
+                                'Friend request accepted.',
                               )
                             }
                           >
@@ -1174,242 +1312,11 @@ export default function Dashboard() {
                           <button
                             className="tiny-button tiny-button-danger"
                             type="button"
-                            disabled={busyAction === `invite-decline-${request.request_id}`}
                             onClick={() =>
                               runAction(
-                                `invite-decline-${request.request_id}`,
-                                () => respondToPartnerInvite(request.request_id, false, null),
-                                'Invite declined.',
-                              )
-                            }
-                          >
-                            Decline
-                          </button>
-                        </div>
-                      </div>
-                    )
-                  })
-                ) : (
-                  <p className="muted-text">No partner invites waiting.</p>
-                )}
-              </div>
-            </article>
-
-          </section>
-        </>
-      ) : null}
-
-      {activeTab === 'admin' && profile.role === 'officer' ? (
-        <>
-          <section className="info-grid">
-            <article className="panel">
-              <p className="eyebrow">Pending Requests</p>
-              <h2>{adminRequests.length}</h2>
-              <p className="muted-text">Requests only appear here after partner confirmation when doubles is involved.</p>
-            </article>
-            <article className="panel">
-              <p className="eyebrow">Players</p>
-              <h2>{profiles.length}</h2>
-              <p className="muted-text">Officers can place members manually and adjust rankings from here.</p>
-            </article>
-            <article className="panel">
-              <p className="eyebrow">Live Control</p>
-              <h2>{entries.length}</h2>
-              <p className="muted-text">Use the ladder tables below to move entries up, down, or remove them.</p>
-            </article>
-          </section>
-
-          <section className="content-grid">
-            <div className="panel panel-wide">
-              <div className="section-heading">
-                <div>
-                  <p className="eyebrow">Officer Leaderboards</p>
-                  <h2>Move and remove entries</h2>
-                </div>
-              </div>
-              <div className="ladder-board-stack">
-                {ladders.map((ladder) => (
-                  <LadderTable
-                    key={ladder.id}
-                    ladder={ladder}
-                    entries={getEntriesForLadder(ladder.id)}
-                    isAdmin
-                    currentUserId={profile.id}
-                    busyAction={busyAction}
-                    onMove={(entryId, newRank) =>
-                      runAction(
-                        `move-${entryId}`,
-                        () => moveEntry(entryId, newRank),
-                        'Leaderboard position updated.',
-                      )
-                    }
-                    onRemove={(entryId) =>
-                      runAction(
-                        `remove-${entryId}`,
-                        () => removeEntry(entryId),
-                        'Leaderboard entry removed.',
-                      )
-                    }
-                  />
-                ))}
-              </div>
-            </div>
-
-            <aside className="sidebar-stack">
-              <section className="panel">
-                <p className="eyebrow">Officer Add</p>
-                <h2>Add a ladder entry</h2>
-                <form className="form-stack compact-form" onSubmit={handleAdminAdd}>
-                  <label>
-                    <span>Ladder</span>
-                    <select
-                      value={adminForm.ladderCode}
-                      onChange={(event) =>
-                        setAdminForm((current) => ({
-                          ...current,
-                          ladderCode: event.target.value,
-                          partnerUserId: '',
-                        }))
-                      }
-                    >
-                      {ladders.map((ladder) => (
-                        <option key={ladder.id} value={ladder.code}>
-                          {ladder.name}
-                        </option>
-                      ))}
-                    </select>
-                  </label>
-                  <label>
-                    <span>Primary player</span>
-                    <select
-                      value={adminForm.userId}
-                      onChange={(event) =>
-                        setAdminForm((current) => ({
-                          ...current,
-                          userId: event.target.value,
-                        }))
-                      }
-                      required
-                    >
-                      <option value="">Select a player</option>
-                      {playerOptions.map((option) => (
-                        <option key={option.value} value={option.value}>
-                          {option.label}
-                        </option>
-                      ))}
-                    </select>
-                  </label>
-                  {DOUBLES_LADDERS.includes(adminForm.ladderCode) ? (
-                    <label>
-                      <span>Partner</span>
-                      <select
-                        value={adminForm.partnerUserId}
-                        onChange={(event) =>
-                          setAdminForm((current) => ({
-                            ...current,
-                            partnerUserId: event.target.value,
-                          }))
-                        }
-                        required
-                      >
-                        <option value="">Select a partner</option>
-                        {playerOptions.map((option) => (
-                          <option key={option.value} value={option.value}>
-                            {option.label}
-                          </option>
-                        ))}
-                      </select>
-                    </label>
-                  ) : null}
-                  <label>
-                    <span>Starting rank</span>
-                    <input
-                      type="number"
-                      min="1"
-                      value={adminForm.rankPosition}
-                      onChange={(event) =>
-                        setAdminForm((current) => ({
-                          ...current,
-                          rankPosition: event.target.value,
-                        }))
-                      }
-                      placeholder="Leave blank for bottom"
-                    />
-                  </label>
-                  <button className="primary-button" type="submit" disabled={busyAction === 'admin-add'}>
-                    {busyAction === 'admin-add' ? 'Adding...' : 'Add entry'}
-                  </button>
-                </form>
-              </section>
-
-              <section className="panel">
-                <p className="eyebrow">Approval Queue</p>
-                <h2>{adminRequests.length} ready for review</h2>
-                <div className="request-list">
-                  {adminRequests.length ? (
-                    adminRequests.map((request) => (
-                      <div className="request-review" key={request.request_id}>
-                        <div>
-                          <strong>{request.requester_name}</strong>
-                          <p>
-                            {request.ladder_name} | {request.request_type}
-                            {request.partner_username ? ` | @${request.partner_username}` : ''}
-                          </p>
-                          {request.target_rank ? (
-                            <p className="muted-text">Challenge target: #{request.target_rank}</p>
-                          ) : null}
-                          {request.requester_drop_ladder_name ? (
-                            <p className="muted-text">Requester drop: {request.requester_drop_ladder_name}</p>
-                          ) : null}
-                          {request.partner_drop_ladder_name ? (
-                            <p className="muted-text">Partner drop: {request.partner_drop_ladder_name}</p>
-                          ) : null}
-                          <div className="inline-field">
-                            <input
-                              type="number"
-                              min="1"
-                              value={adminRankInputs[request.request_id] || ''}
-                              onChange={(event) =>
-                                setAdminRankInputs((current) => ({
-                                  ...current,
-                                  [request.request_id]: event.target.value,
-                                }))
-                              }
-                              placeholder="Optional rank override"
-                            />
-                          </div>
-                        </div>
-                        <div className="inline-actions">
-                          <button
-                            className="tiny-button"
-                            type="button"
-                            disabled={busyAction === `approve-${request.request_id}`}
-                            onClick={() =>
-                              runAction(
-                                `approve-${request.request_id}`,
-                                () =>
-                                  resolveRequest(
-                                    request.request_id,
-                                    'approved',
-                                    adminRankInputs[request.request_id]
-                                      ? Number(adminRankInputs[request.request_id])
-                                      : null,
-                                  ),
-                                'Officer request approved.',
-                              )
-                            }
-                          >
-                            Approve
-                          </button>
-                          <button
-                            className="tiny-button tiny-button-danger"
-                            type="button"
-                            disabled={busyAction === `reject-${request.request_id}`}
-                            onClick={() =>
-                              runAction(
-                                `reject-${request.request_id}`,
-                                () => resolveRequest(request.request_id, 'rejected', null),
-                                'Officer request rejected.',
+                                `friend-reject-${request.request_id}`,
+                                () => respondToFriendRequest(request.request_id, false),
+                                'Friend request rejected.',
                               )
                             }
                           >
@@ -1419,47 +1326,341 @@ export default function Dashboard() {
                       </div>
                     ))
                   ) : (
-                    <p className="muted-text">No officer-ready requests right now.</p>
+                    <p className="muted-text">No incoming requests.</p>
                   )}
                 </div>
               </section>
             </aside>
           </section>
-        </>
+
+          <section className="panel section-spaced">
+            <div className="section-heading">
+              <div>
+                <p className="eyebrow">Friends</p>
+                <h2>{snapshot?.friends?.length ?? 0} connected players</h2>
+              </div>
+            </div>
+            <div className="friends-grid">
+              {(snapshot?.friends ?? []).length ? (
+                snapshot.friends.map((friend) => (
+                  <article className="panel-subtle" key={friend.friend_id}>
+                    <strong>{friend.friend_full_name}</strong>
+                    <p className="muted-text">
+                      @{friend.friend_username} | {formatSex(friend.friend_sex)}
+                    </p>
+                  </article>
+                ))
+              ) : (
+                <p className="muted-text">Accepted friends appear here.</p>
+              )}
+            </div>
+          </section>
+        </section>
       ) : null}
 
-      {dropConfirmEntry ? (
-        <div className="modal-backdrop" role="presentation" onClick={() => setDropConfirmEntry(null)}>
-          <div
-            className="modal-card"
-            role="dialog"
-            aria-modal="true"
-            aria-labelledby="drop-confirm-title"
-            onClick={(event) => event.stopPropagation()}
-          >
-            <p className="eyebrow">Confirm Drop</p>
-            <h2 id="drop-confirm-title">Remove your spot from {dropConfirmEntry.ladder_name}?</h2>
-            <p>
-              This will remove your current ladder position and close the gap exactly the same way an officer removal does.
-            </p>
-            {dropConfirmEntry.partner_user_id ? (
-              <p className="muted-text">This is a doubles entry, so dropping it removes the full team from the ladder.</p>
-            ) : null}
-            <div className="modal-actions">
-              <button className="secondary-button" type="button" onClick={() => setDropConfirmEntry(null)}>
-                Cancel
-              </button>
-              <button
-                className="primary-button danger-button"
-                type="button"
-                disabled={busyAction === `self-drop-${dropConfirmEntry.entry_id}`}
-                onClick={confirmSelfDrop}
-              >
-                {busyAction === `self-drop-${dropConfirmEntry.entry_id}` ? 'Dropping...' : 'Yes, drop my spot'}
-              </button>
+      {activeTab === 'court' ? (
+        <section className="tab-panel">
+          <NotificationList
+            category="court"
+            notifications={notifications}
+            open={categoryNotificationsOpen.court}
+            onToggle={() =>
+              setCategoryNotificationsOpen((current) => ({ ...current, court: !current.court }))
+            }
+            onRead={(id) => runAction(`read-${id}`, () => markNotificationRead(id), 'Notification marked read.')}
+            onReadCategory={(category) =>
+              runAction(`read-${category}`, () => markCategoryNotificationsRead(category), 'Notifications marked read.')
+            }
+          />
+
+          <section className="content-grid section-spaced">
+            <div className="panel panel-wide">
+              <div className="section-heading">
+                <div>
+                  <p className="eyebrow">Create court</p>
+                  <h2>Post a time to play</h2>
+                </div>
+              </div>
+              <form className="form-stack" onSubmit={handleCreateCourt}>
+                <div className="form-grid">
+                  <label>
+                    <span>Play type</span>
+                    <select
+                      value={courtForm.playType}
+                      onChange={(event) => updateCourtForm('playType', event.target.value)}
+                    >
+                      <option value="singles">Singles</option>
+                      <option value="doubles">Doubles</option>
+                      <option value="either">Either</option>
+                    </select>
+                  </label>
+                  <label>
+                    <span>Date</span>
+                    <input
+                      type="date"
+                      value={courtForm.date}
+                      onChange={(event) => updateCourtForm('date', event.target.value)}
+                      required
+                    />
+                  </label>
+                  <label>
+                    <span>Time</span>
+                    <input
+                      type="time"
+                      value={courtForm.time}
+                      onChange={(event) => updateCourtForm('time', event.target.value)}
+                      required
+                    />
+                  </label>
+                </div>
+
+                <label>
+                  <span>Description</span>
+                  <textarea
+                    value={courtForm.description}
+                    onChange={(event) => updateCourtForm('description', event.target.value)}
+                    rows={3}
+                    placeholder="Short note about pace, format, or meetup details"
+                  />
+                </label>
+
+                <div className="form-grid">
+                  <label>
+                    <span>Location</span>
+                    <select
+                      value={courtForm.locationType}
+                      onChange={(event) => updateCourtForm('locationType', event.target.value)}
+                    >
+                      <option value="osu">OSU Courts</option>
+                      <option value="custom">Custom</option>
+                    </select>
+                  </label>
+                  {courtForm.locationType === 'osu' ? (
+                    <label>
+                      <span>OSU court number</span>
+                      <input
+                        type="number"
+                        min="1"
+                        max="10"
+                        value={courtForm.osuCourtNumber}
+                        onChange={(event) => updateCourtForm('osuCourtNumber', event.target.value)}
+                      />
+                    </label>
+                  ) : (
+                    <label>
+                      <span>Custom location</span>
+                      <input
+                        value={courtForm.customLocation}
+                        onChange={(event) => updateCourtForm('customLocation', event.target.value)}
+                        placeholder="Court location"
+                        required
+                      />
+                    </label>
+                  )}
+                </div>
+
+                <section className="panel-subtle">
+                  <p className="eyebrow">Broadcast</p>
+                  <div className="check-grid">
+                    <label className="check-row">
+                      <input
+                        type="checkbox"
+                        checked={courtForm.broadcastPublic}
+                        onChange={(event) => updateCourtForm('broadcastPublic', event.target.checked)}
+                      />
+                      <span>Public</span>
+                    </label>
+                    <label className="check-row">
+                      <input
+                        type="checkbox"
+                        checked={courtForm.broadcastFriends}
+                        onChange={(event) => updateCourtForm('broadcastFriends', event.target.checked)}
+                      />
+                      <span>Friends</span>
+                    </label>
+                  </div>
+                  {clubs.length ? (
+                    <div className="check-grid section-spaced-tight">
+                      {clubs.map((club) => (
+                        <label className="check-row" key={club.id}>
+                          <input
+                            type="checkbox"
+                            checked={courtForm.broadcastClubIds.includes(club.id)}
+                            onChange={() => toggleCourtClub(club.id)}
+                          />
+                          <span>{club.name}</span>
+                        </label>
+                      ))}
+                    </div>
+                  ) : null}
+                </section>
+
+                <section className="panel-subtle">
+                  <p className="eyebrow">Invite specific friends</p>
+                  <div className="check-grid">
+                    {(snapshot?.friends ?? []).length ? (
+                      snapshot.friends.map((friend) => (
+                        <label className="check-row" key={friend.friend_id}>
+                          <input
+                            type="checkbox"
+                            checked={courtForm.invitedFriendIds.includes(friend.friend_id)}
+                            onChange={() => toggleCourtFriend(friend.friend_id)}
+                          />
+                          <span>{friend.friend_full_name}</span>
+                        </label>
+                      ))
+                    ) : (
+                      <p className="muted-text">Add friends from Social to invite them directly.</p>
+                    )}
+                  </div>
+                </section>
+
+                <button className="primary-button" type="submit" disabled={busyAction === 'create-court'}>
+                  {busyAction === 'create-court' ? 'Creating...' : 'Create court'}
+                </button>
+              </form>
             </div>
-          </div>
-        </div>
+
+            <aside className="sidebar-stack">
+              <section className="panel">
+                <p className="eyebrow">Court rules</p>
+                <h2>Request or accept</h2>
+                <p className="muted-text">
+                  Broadcasted players request to join. Direct invitees accept the invite without a separate request.
+                </p>
+              </section>
+            </aside>
+          </section>
+
+          <section className="panel section-spaced">
+            <div className="section-heading">
+              <div>
+                <p className="eyebrow">Visible courts</p>
+                <h2>{snapshot?.courts?.length ?? 0} upcoming posts</h2>
+              </div>
+            </div>
+            <div className="court-grid">
+              {(snapshot?.courts ?? []).length ? (
+                snapshot.courts.map((court) => (
+                  <article className="court-card" key={court.id}>
+                    <div className="section-heading">
+                      <div>
+                        <strong>{court.location_label}</strong>
+                        <p className="muted-text">
+                          {formatDateTime(court.scheduled_at)} | {court.play_type} | {court.participant_count}/{court.capacity}
+                        </p>
+                      </div>
+                      <span className="status-pill">{court.is_full ? 'Full' : 'Open'}</span>
+                    </div>
+                    <p className="muted-text">Created by {court.creator_name}</p>
+                    {court.description ? <p>{court.description}</p> : null}
+                    <p className="muted-text">
+                      Audience: {[...court.audiences, court.club_ids.length ? 'selected clubs' : null]
+                        .filter(Boolean)
+                        .join(', ')}
+                    </p>
+
+                    {court.is_creator ? (
+                      <div className="request-list">
+                        <p className="eyebrow">Join requests</p>
+                        {court.join_requests.filter((request) => request.status === 'pending').length ? (
+                          court.join_requests
+                            .filter((request) => request.status === 'pending')
+                            .map((request) => (
+                              <div className="request-review" key={request.request_id}>
+                                <div>
+                                  <strong>{request.requester_name}</strong>
+                                  <p className="muted-text">@{request.requester_username}</p>
+                                </div>
+                                <div className="inline-actions">
+                                  <button
+                                    className="tiny-button"
+                                    type="button"
+                                    onClick={() =>
+                                      runAction(
+                                        `court-join-accept-${request.request_id}`,
+                                        () => respondCourtJoinRequest(request.request_id, true),
+                                        'Court join request accepted.',
+                                      )
+                                    }
+                                  >
+                                    Accept
+                                  </button>
+                                  <button
+                                    className="tiny-button tiny-button-danger"
+                                    type="button"
+                                    onClick={() =>
+                                      runAction(
+                                        `court-join-reject-${request.request_id}`,
+                                        () => respondCourtJoinRequest(request.request_id, false),
+                                        'Court join request rejected.',
+                                      )
+                                    }
+                                  >
+                                    Reject
+                                  </button>
+                                </div>
+                              </div>
+                            ))
+                        ) : (
+                          <p className="muted-text">No pending join requests.</p>
+                        )}
+                      </div>
+                    ) : court.my_invite?.status === 'pending' ? (
+                      <div className="inline-actions">
+                        <button
+                          className="tiny-button"
+                          type="button"
+                          onClick={() =>
+                            runAction(
+                              `invite-accept-${court.my_invite.invite_id}`,
+                              () => respondCourtInvite(court.my_invite.invite_id, true),
+                              'Court invite accepted.',
+                            )
+                          }
+                        >
+                          Accept invite
+                        </button>
+                        <button
+                          className="tiny-button tiny-button-danger"
+                          type="button"
+                          onClick={() =>
+                            runAction(
+                              `invite-reject-${court.my_invite.invite_id}`,
+                              () => respondCourtInvite(court.my_invite.invite_id, false),
+                              'Court invite declined.',
+                            )
+                          }
+                        >
+                          Decline
+                        </button>
+                      </div>
+                    ) : court.my_join_request ? (
+                      <span className="status-pill">Request {court.my_join_request.status}</span>
+                    ) : (
+                      <button
+                        className="tiny-button"
+                        type="button"
+                        disabled={court.is_full}
+                        onClick={() =>
+                          runAction(
+                            `court-request-${court.id}`,
+                            () => requestJoinCourt(court.id),
+                            'Court join request sent.',
+                          )
+                        }
+                      >
+                        Request to join
+                      </button>
+                    )}
+                  </article>
+                ))
+              ) : (
+                <p className="muted-text">No courts are visible yet.</p>
+              )}
+            </div>
+          </section>
+        </section>
       ) : null}
     </main>
   )
