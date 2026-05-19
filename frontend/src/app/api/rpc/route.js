@@ -419,6 +419,23 @@ const RPC_CONFIG = {
       }
     },
   },
+  leave_court: {
+    rateLimit: { limit: 30, windowMs: 10 * 60 * 1000, scope: 'user' },
+    sanitizePayload(payload) {
+      return {
+        p_court_id: uuid(payload.p_court_id, 'Court'),
+      }
+    },
+  },
+  remove_user_from_court: {
+    rateLimit: { limit: 40, windowMs: 10 * 60 * 1000, scope: 'user' },
+    sanitizePayload(payload) {
+      return {
+        p_court_id: uuid(payload.p_court_id, 'Court'),
+        p_user_id: uuid(payload.p_user_id, 'Player'),
+      }
+    },
+  },
 }
 
 function applyRateLimit(request, profile, functionName, config) {

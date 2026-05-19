@@ -31,6 +31,25 @@ function roleCanManage(role) {
   return role === 'officer' || role === 'president'
 }
 
+function isAuthError(error) {
+  const message = String(error?.message || '').toLowerCase()
+
+  return (
+    message.includes('logged in') ||
+    message.includes('session') ||
+    message.includes('profile not found') ||
+    message.includes('jwt')
+  )
+}
+
+async function cleanupExpiredCourts(supabaseAdmin) {
+  const { error } = await supabaseAdmin.rpc('cleanup_expired_courts')
+
+  if (error) {
+    console.warn('Expired court cleanup skipped:', error.message)
+  }
+}
+
 function formatFriendRow(friendship, currentUserId, profilesById) {
   const friendId =
     friendship.user_one_id === currentUserId ? friendship.user_two_id : friendship.user_one_id
@@ -49,6 +68,7 @@ function formatFriendRow(friendship, currentUserId, profilesById) {
 export async function GET(request) {
   try {
     const { user, profile, supabaseAdmin } = await requireProfile(request)
+    await cleanupExpiredCourts(supabaseAdmin)
 
     const [
       membershipsResult,
@@ -150,7 +170,7 @@ export async function GET(request) {
       supabaseAdmin
         .from('courts')
         .select('*')
-        .gte('scheduled_at', new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString())
+        .gt('scheduled_at', new Date().toISOString())
         .order('scheduled_at', { ascending: true })
         .limit(120),
     ])
@@ -464,6 +484,10 @@ export async function GET(request) {
       courts,
     })
   } catch (error) {
-    return json({ error: error.message || 'Unable to load dashboard.' }, 401)
+    const status = isAuthError(error) ? 401 : 500
+
+    console.error('Dashboard API failed:', error)
+
+    return json({ error: error.message || 'Unable to load dashboard.' }, status)
   }
 }

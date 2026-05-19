@@ -752,7 +752,10 @@ begin
   end if;
 
   update public.friend_requests
-  set status = case when p_accept then 'accepted' else 'rejected' end,
+  set status = case
+        when p_accept then 'accepted'::public.friend_request_status
+        else 'rejected'::public.friend_request_status
+      end,
       responded_at = timezone('utc', now())
   where id = p_request_id;
 
@@ -1460,6 +1463,23 @@ as $$
     + (select count(*)::integer from public.court_join_requests where court_id = p_court_id and status = 'accepted');
 $$;
 
+create or replace function public.cleanup_expired_courts()
+returns integer
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  v_deleted integer;
+begin
+  delete from public.courts
+  where scheduled_at <= timezone('utc', now());
+
+  get diagnostics v_deleted = row_count;
+  return v_deleted;
+end;
+$$;
+
 create or replace function public.can_user_see_court(p_user_id uuid, p_court_id uuid)
 returns boolean
 language sql
@@ -1525,6 +1545,8 @@ declare
   v_friend_id uuid;
   v_invites uuid[] := coalesce(p_invited_friend_ids, '{}');
 begin
+  perform public.cleanup_expired_courts();
+
   if auth.uid() is null then
     raise exception 'You must be logged in.';
   end if;
@@ -1635,6 +1657,8 @@ declare
   v_request_id uuid;
   v_profile public.profiles;
 begin
+  perform public.cleanup_expired_courts();
+
   select * into v_court from public.courts where id = p_court_id;
 
   if v_court.id is null then
@@ -1681,6 +1705,121 @@ exception
 end;
 $$;
 
+create or replace function public.leave_court(p_court_id uuid)
+returns void
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  v_court public.courts;
+  v_profile public.profiles;
+  v_removed boolean := false;
+begin
+  perform public.cleanup_expired_courts();
+
+  select * into v_court from public.courts where id = p_court_id;
+
+  if v_court.id is null then
+    raise exception 'Court not found.';
+  end if;
+
+  if v_court.creator_id = auth.uid() then
+    raise exception 'Court creators cannot leave their own court.';
+  end if;
+
+  delete from public.court_invites
+  where court_id = p_court_id
+    and invited_user_id = auth.uid()
+    and status in ('pending', 'accepted');
+
+  if found then
+    v_removed := true;
+  end if;
+
+  delete from public.court_join_requests
+  where court_id = p_court_id
+    and requester_id = auth.uid()
+    and status in ('pending', 'accepted');
+
+  if found then
+    v_removed := true;
+  end if;
+
+  if not v_removed then
+    raise exception 'You are not joined to this court.';
+  end if;
+
+  select * into v_profile from public.profiles where id = auth.uid();
+
+  perform public.add_notification(
+    v_court.creator_id,
+    'court',
+    'Player left court',
+    public.full_name(v_profile) || ' left your court.',
+    jsonb_build_object('court_id', p_court_id)
+  );
+end;
+$$;
+
+create or replace function public.remove_user_from_court(p_court_id uuid, p_user_id uuid)
+returns void
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  v_court public.courts;
+  v_removed boolean := false;
+begin
+  perform public.cleanup_expired_courts();
+
+  select * into v_court from public.courts where id = p_court_id;
+
+  if v_court.id is null then
+    raise exception 'Court not found.';
+  end if;
+
+  if v_court.creator_id <> auth.uid() then
+    raise exception 'Only the court creator can remove players.';
+  end if;
+
+  if p_user_id = auth.uid() then
+    raise exception 'Court creators cannot remove themselves.';
+  end if;
+
+  delete from public.court_invites
+  where court_id = p_court_id
+    and invited_user_id = p_user_id
+    and status in ('pending', 'accepted');
+
+  if found then
+    v_removed := true;
+  end if;
+
+  delete from public.court_join_requests
+  where court_id = p_court_id
+    and requester_id = p_user_id
+    and status in ('pending', 'accepted');
+
+  if found then
+    v_removed := true;
+  end if;
+
+  if not v_removed then
+    raise exception 'That player is not on this court.';
+  end if;
+
+  perform public.add_notification(
+    p_user_id,
+    'court',
+    'Removed from court',
+    'The court creator removed you from a court.',
+    jsonb_build_object('court_id', p_court_id)
+  );
+end;
+$$;
+
 create or replace function public.respond_court_join_request(p_request_id uuid, p_accept boolean)
 returns void
 language plpgsql
@@ -1691,6 +1830,8 @@ declare
   v_request public.court_join_requests;
   v_court public.courts;
 begin
+  perform public.cleanup_expired_courts();
+
   select * into v_request
   from public.court_join_requests
   where id = p_request_id
@@ -1711,7 +1852,10 @@ begin
   end if;
 
   update public.court_join_requests
-  set status = case when p_accept then 'accepted' else 'rejected' end,
+  set status = case
+        when p_accept then 'accepted'::public.court_response_status
+        else 'rejected'::public.court_response_status
+      end,
       responded_at = timezone('utc', now())
   where id = p_request_id;
 
@@ -1736,6 +1880,8 @@ declare
   v_court public.courts;
   v_profile public.profiles;
 begin
+  perform public.cleanup_expired_courts();
+
   select * into v_invite
   from public.court_invites
   where id = p_invite_id
@@ -1753,7 +1899,10 @@ begin
   end if;
 
   update public.court_invites
-  set status = case when p_accept then 'accepted' else 'rejected' end,
+  set status = case
+        when p_accept then 'accepted'::public.court_response_status
+        else 'rejected'::public.court_response_status
+      end,
       responded_at = timezone('utc', now())
   where id = p_invite_id;
 
@@ -1794,8 +1943,94 @@ on public.ladders for select
 to authenticated
 using (true);
 
+create policy "users can read relevant clubs"
+on public.clubs for select
+to authenticated
+using (public.is_club_member(auth.uid(), id));
+
+create policy "users can read club rosters"
+on public.club_memberships for select
+to authenticated
+using (public.is_club_member(auth.uid(), club_id));
+
+create policy "users can read their friend requests"
+on public.friend_requests for select
+to authenticated
+using (sender_id = auth.uid() or receiver_id = auth.uid());
+
+create policy "users can read their friendships"
+on public.friendships for select
+to authenticated
+using (user_one_id = auth.uid() or user_two_id = auth.uid());
+
+create policy "users can read their notifications"
+on public.app_notifications for select
+to authenticated
+using (user_id = auth.uid());
+
+create policy "club members can read ladder entries"
+on public.ladder_entries for select
+to authenticated
+using (public.is_club_member(auth.uid(), club_id));
+
+create policy "users can read relevant ladder requests"
+on public.ladder_requests for select
+to authenticated
+using (
+  requester_id = auth.uid()
+  or partner_user_id = auth.uid()
+  or public.club_role_for(auth.uid(), club_id) in ('officer', 'president')
+);
+
+create policy "users can read visible courts"
+on public.courts for select
+to authenticated
+using (public.can_user_see_court(auth.uid(), id));
+
+create policy "users can read visible court audiences"
+on public.court_audiences for select
+to authenticated
+using (public.can_user_see_court(auth.uid(), court_id));
+
+create policy "users can read visible court clubs"
+on public.court_clubs for select
+to authenticated
+using (public.can_user_see_court(auth.uid(), court_id));
+
+create policy "users can read relevant court invites"
+on public.court_invites for select
+to authenticated
+using (public.can_user_see_court(auth.uid(), court_id));
+
+create policy "users can read relevant court join requests"
+on public.court_join_requests for select
+to authenticated
+using (
+  requester_id = auth.uid()
+  or exists (
+    select 1
+    from public.courts c
+    where c.id = court_join_requests.court_id
+      and c.creator_id = auth.uid()
+  )
+);
+
 grant usage on schema public to anon, authenticated;
-grant select on public.ladders to authenticated;
+grant select on
+  public.app_notifications,
+  public.clubs,
+  public.club_memberships,
+  public.friend_requests,
+  public.friendships,
+  public.ladders,
+  public.ladder_entries,
+  public.ladder_requests,
+  public.courts,
+  public.court_audiences,
+  public.court_clubs,
+  public.court_invites,
+  public.court_join_requests
+to authenticated;
 grant execute on function public.mark_notification_read(uuid) to authenticated;
 grant execute on function public.mark_category_notifications_read(public.notification_category) to authenticated;
 grant execute on function public.create_club(text, text) to authenticated;
@@ -1816,6 +2051,16 @@ grant execute on function public.create_court(public.court_play_type, text, time
 grant execute on function public.request_join_court(uuid) to authenticated;
 grant execute on function public.respond_court_join_request(uuid, boolean) to authenticated;
 grant execute on function public.respond_court_invite(uuid, boolean) to authenticated;
+grant execute on function public.leave_court(uuid) to authenticated;
+grant execute on function public.remove_user_from_court(uuid, uuid) to authenticated;
+grant execute on function public.cleanup_expired_courts() to authenticated;
+
+do $$
+begin
+  alter publication supabase_realtime add table public.clubs;
+exception
+  when duplicate_object then null;
+end $$;
 
 do $$
 begin
@@ -1827,6 +2072,13 @@ end $$;
 do $$
 begin
   alter publication supabase_realtime add table public.friend_requests;
+exception
+  when duplicate_object then null;
+end $$;
+
+do $$
+begin
+  alter publication supabase_realtime add table public.friendships;
 exception
   when duplicate_object then null;
 end $$;
@@ -1855,6 +2107,20 @@ end $$;
 do $$
 begin
   alter publication supabase_realtime add table public.courts;
+exception
+  when duplicate_object then null;
+end $$;
+
+do $$
+begin
+  alter publication supabase_realtime add table public.court_audiences;
+exception
+  when duplicate_object then null;
+end $$;
+
+do $$
+begin
+  alter publication supabase_realtime add table public.court_clubs;
 exception
   when duplicate_object then null;
 end $$;

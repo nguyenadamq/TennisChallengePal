@@ -162,3 +162,16 @@ export function respondCourtInvite(inviteId, accept) {
     p_accept: accept,
   })
 }
+
+export function leaveCourt(courtId) {
+  return rpc('leave_court', {
+    p_court_id: courtId,
+  })
+}
+
+export function removeUserFromCourt(courtId, userId) {
+  return rpc('remove_user_from_court', {
+    p_court_id: courtId,
+    p_user_id: userId,
+  })
+}

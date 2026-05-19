@@ -11,6 +11,7 @@ import {
   createCourt,
   fetchDashboardData,
   joinClub,
+  leaveCourt,
   markCategoryNotificationsRead,
   markNotificationRead,
   memberDropOwnLadderEntry,
@@ -19,6 +20,7 @@ import {
   officerRemoveLadderEntry,
   officerResolveLadderRequest,
   requestJoinCourt,
+  removeUserFromCourt,
   respondCourtInvite,
   respondCourtJoinRequest,
   respondToFriendRequest,
@@ -60,6 +62,20 @@ const courtDefaults = {
   invitedFriendIds: [],
 }
 const EMPTY_LIST = []
+const REALTIME_TABLES = [
+  'app_notifications',
+  'clubs',
+  'club_memberships',
+  'friend_requests',
+  'friendships',
+  'ladder_entries',
+  'ladder_requests',
+  'courts',
+  'court_audiences',
+  'court_clubs',
+  'court_invites',
+  'court_join_requests',
+]
 
 function formatSex(value) {
   return value === 'woman' ? 'Woman' : 'Man'
@@ -235,36 +251,27 @@ export default function Dashboard() {
 
     init()
 
-    const channel = supabase
-      .channel('tennis-pal-live')
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'app_notifications' }, () =>
-        loadDashboard().catch(() => {}),
-      )
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'club_memberships' }, () =>
-        loadDashboard().catch(() => {}),
-      )
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'friend_requests' }, () =>
-        loadDashboard().catch(() => {}),
-      )
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'ladder_entries' }, () =>
-        loadDashboard().catch(() => {}),
-      )
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'ladder_requests' }, () =>
-        loadDashboard().catch(() => {}),
-      )
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'courts' }, () =>
-        loadDashboard().catch(() => {}),
-      )
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'court_invites' }, () =>
-        loadDashboard().catch(() => {}),
-      )
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'court_join_requests' }, () =>
-        loadDashboard().catch(() => {}),
-      )
-      .subscribe()
+    let reloadTimer = null
+    const scheduleReload = () => {
+      window.clearTimeout(reloadTimer)
+      reloadTimer = window.setTimeout(() => {
+        loadDashboard().catch(() => {})
+      }, 250)
+    }
+
+    const channel = REALTIME_TABLES.reduce(
+      (nextChannel, table) =>
+        nextChannel.on('postgres_changes', { event: '*', schema: 'public', table }, scheduleReload),
+      supabase.channel('tennis-pal-live'),
+    ).subscribe()
+    const cleanupInterval = window.setInterval(() => {
+      loadDashboard().catch(() => {})
+    }, 60 * 1000)
 
     return () => {
       active = false
+      window.clearTimeout(reloadTimer)
+      window.clearInterval(cleanupInterval)
       supabase.removeChannel(channel)
     }
   }, [loadDashboard])
@@ -1541,7 +1548,31 @@ export default function Dashboard() {
             </div>
             <div className="court-grid">
               {(snapshot?.courts ?? []).length ? (
-                snapshot.courts.map((court) => (
+                snapshot.courts.map((court) => {
+                  const acceptedInvites = court.invites.filter((invite) => invite.status === 'accepted')
+                  const acceptedJoinRequests = court.join_requests.filter(
+                    (request) => request.status === 'accepted',
+                  )
+                  const participants = [
+                    ...acceptedInvites.map((invite) => ({
+                      userId: invite.invited_user_id,
+                      name: invite.invited_name,
+                      username: invite.invited_username,
+                    })),
+                    ...acceptedJoinRequests.map((request) => ({
+                      userId: request.requester_id,
+                      name: request.requester_name,
+                      username: request.requester_username,
+                    })),
+                  ]
+                  const hasJoined =
+                    court.my_invite?.status === 'accepted' ||
+                    court.my_join_request?.status === 'accepted'
+                  const hasPendingJoin =
+                    court.my_invite?.status === 'pending' ||
+                    court.my_join_request?.status === 'pending'
+
+                  return (
                   <article className="court-card" key={court.id}>
                     <div className="section-heading">
                       <div>
@@ -1562,6 +1593,32 @@ export default function Dashboard() {
 
                     {court.is_creator ? (
                       <div className="request-list">
+                        <p className="eyebrow">Players</p>
+                        {participants.length ? (
+                          participants.map((participant) => (
+                            <div className="request-review" key={participant.userId}>
+                              <div>
+                                <strong>{participant.name}</strong>
+                                <p className="muted-text">@{participant.username}</p>
+                              </div>
+                              <button
+                                className="tiny-button tiny-button-danger"
+                                type="button"
+                                onClick={() =>
+                                  runAction(
+                                    `court-remove-${court.id}-${participant.userId}`,
+                                    () => removeUserFromCourt(court.id, participant.userId),
+                                    'Player removed from court.',
+                                  )
+                                }
+                              >
+                                Remove
+                              </button>
+                            </div>
+                          ))
+                        ) : (
+                          <p className="muted-text">No accepted players yet.</p>
+                        )}
                         <p className="eyebrow">Join requests</p>
                         {court.join_requests.filter((request) => request.status === 'pending').length ? (
                           court.join_requests
@@ -1606,6 +1663,23 @@ export default function Dashboard() {
                           <p className="muted-text">No pending join requests.</p>
                         )}
                       </div>
+                    ) : hasJoined ? (
+                      <div className="inline-actions">
+                        <span className="status-pill">Joined</span>
+                        <button
+                          className="tiny-button tiny-button-danger"
+                          type="button"
+                          onClick={() =>
+                            runAction(
+                              `court-leave-${court.id}`,
+                              () => leaveCourt(court.id),
+                              'You left the court.',
+                            )
+                          }
+                        >
+                          Leave court
+                        </button>
+                      </div>
                     ) : court.my_invite?.status === 'pending' ? (
                       <div className="inline-actions">
                         <button
@@ -1636,7 +1710,24 @@ export default function Dashboard() {
                         </button>
                       </div>
                     ) : court.my_join_request ? (
+                      <div className="inline-actions">
                       <span className="status-pill">Request {court.my_join_request.status}</span>
+                        {hasPendingJoin ? (
+                          <button
+                            className="tiny-button tiny-button-danger"
+                            type="button"
+                            onClick={() =>
+                              runAction(
+                                `court-cancel-${court.id}`,
+                                () => leaveCourt(court.id),
+                                'Court request cancelled.',
+                              )
+                            }
+                          >
+                            Cancel
+                          </button>
+                        ) : null}
+                      </div>
                     ) : (
                       <button
                         className="tiny-button"
@@ -1654,7 +1745,8 @@ export default function Dashboard() {
                       </button>
                     )}
                   </article>
-                ))
+                  )
+                })
               ) : (
                 <p className="muted-text">No courts are visible yet.</p>
               )}
